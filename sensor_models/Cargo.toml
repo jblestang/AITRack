@@ -1,0 +1,10 @@
+[package]
+name = "sensor_models"
+version = "0.1.0"
+edition = "2021"
+description = "Sensor observation models, H/R matrices, polar<->cartesian conversions"
+
+[dependencies]
+nalgebra = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

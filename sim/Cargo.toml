@@ -1,0 +1,19 @@
+[package]
+name = "sim"
+version = "0.1.0"
+edition = "2021"
+description = "Scenario simulator: target trajectories, radar measurements, clutter, bias injection"
+
+[dependencies]
+nalgebra = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+csv = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracker_core = { path = "../tracker_core" }
+sensor_models = { path = "../sensor_models" }
+anyhow = { workspace = true }
+clap = { workspace = true }

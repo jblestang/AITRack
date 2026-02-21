@@ -1,0 +1,21 @@
+[package]
+name = "tracker_core"
+version = "0.1.0"
+edition = "2021"
+description = "Core tracking algorithms: KF, gating, association, track management"
+
+[dependencies]
+nalgebra = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"
+
+[[bench]]
+name = "pipeline_bench"
+harness = false
+
+[dev-dependencies.criterion]
+workspace = true
