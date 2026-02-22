@@ -6,7 +6,7 @@ use tracker_core::{kf::CvKfConfig, pipeline::PipelineConfig, track_manager::Trac
 use crate::{
     render::{
         render_associations_system, render_gates_system, render_measurements_system,
-        render_radars_system, render_tracks_system,
+        render_radars_system, render_tracks_system, render_ground_truth_system,
     },
     resources::{RenderSettings, ResetEvent, SimState, StepEvent, TrackerAppState},
     systems::{advance_simulation_system, keyboard_control_system, reset_system},
@@ -79,6 +79,7 @@ pub fn run_debug_app(kind: ScenarioKind, seed: u64) {
                 render_radars_system,
                 render_measurements_system,
                 render_tracks_system,
+                render_ground_truth_system,
                 render_gates_system,
                 render_associations_system,
             )

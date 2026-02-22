@@ -108,6 +108,8 @@ pub struct RenderSettings {
     pub show_components: bool,
     /// Show only confirmed tracks (hide tentative)
     pub confirmed_only: bool,
+    /// Show simulated ground truth tracks
+    pub show_ground_truth: bool,
 }
 
 impl Default for RenderSettings {
@@ -119,6 +121,7 @@ impl Default for RenderSettings {
             show_trails: true,
             show_components: false,
             confirmed_only: false,
+            show_ground_truth: true,
         }
     }
 }

@@ -192,8 +192,50 @@ pub fn render_radars_system(
         );
         let color = sensor_color(&radar.id);
         gizmos.circle_2d(pos, 10.0, color);
-        // Draw FoV indicator (stubbed as outer circle fraction)
         let r = radar.params.max_range as f32 * render.world_to_screen_scale;
         gizmos.circle_2d(pos, r.min(600.0), color.with_alpha(0.08));
+    }
+}
+
+/// Render ground truth targets (actual simulation states).
+pub fn render_ground_truth_system(
+    mut gizmos: Gizmos,
+    sim_state: Res<SimState>,
+    render: Res<RenderSettings>,
+) {
+    if !render.show_ground_truth {
+        return;
+    }
+    
+    // Draw ground truth targets as subtle white diamonds
+    for target in &sim_state.scenario.targets {
+        if !target.is_active(sim_state.sim_time) {
+            continue;
+        }
+        
+        let pos = world_to_screen(
+            target.state[0],
+            target.state[1],
+            render.world_to_screen_scale,
+        );
+        let color = Color::srgba(1.0, 1.0, 1.0, 0.4);
+        
+        // Diamond
+        let r = 5.0;
+        gizmos.line_2d(pos + Vec2::new(0., r), pos + Vec2::new(r, 0.), color);
+        gizmos.line_2d(pos + Vec2::new(r, 0.), pos + Vec2::new(0., -r), color);
+        gizmos.line_2d(pos + Vec2::new(0., -r), pos + Vec2::new(-r, 0.), color);
+        gizmos.line_2d(pos + Vec2::new(-r, 0.), pos + Vec2::new(0., r), color);
+
+        // Velocity arrow
+        let vx = target.state[3];
+        let vy = target.state[4];
+        let vel_scale = 3.0; // seconds of prediction to show
+        let arrow_end = world_to_screen(
+            target.state[0] + vx * vel_scale,
+            target.state[1] + vy * vel_scale,
+            render.world_to_screen_scale,
+        );
+        gizmos.line_2d(pos, arrow_end, color.with_alpha(0.5));
     }
 }

@@ -69,6 +69,7 @@ pub fn ui_control_panel(
 
         // Second row: render toggles
         ui.horizontal(|ui| {
+            ui.checkbox(&mut render.show_ground_truth, "Ground Truth");
             ui.checkbox(&mut render.show_gates, "Gates");
             ui.checkbox(&mut render.show_associations, "Assoc.");
             ui.checkbox(&mut render.show_trails, "Trails");
