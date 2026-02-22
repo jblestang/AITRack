@@ -110,6 +110,47 @@ pub fn advance_simulation_system(
             if tracker_state.timing_history.len() > 100 {
                 tracker_state.timing_history.remove(0);
             }
+
+            // Accumulate metrics for all confirmed tracks
+            use tracker_core::track::TrackStatus;
+            for track in &output.tracks {
+                if track.status == TrackStatus::Confirmed {
+                    // Greedy association: find closest active target
+                    let mut min_dist_sq = f64::MAX;
+                    let mut best_target = None;
+                    for target in &sim_state.scenario.targets {
+                        if target.is_active(sim_state.sim_time) {
+                            let dx = track.state[0] - target.state[0];
+                            let dy = track.state[1] - target.state[1];
+                            let dist_sq = dx * dx + dy * dy;
+                            if dist_sq < min_dist_sq {
+                                min_dist_sq = dist_sq;
+                                best_target = Some(target.id);
+                            }
+                        }
+                    }
+
+                    let metrics = tracker_state.all_track_metrics.entry(track.id).or_insert_with(|| {
+                        crate::resources::TrackMetrics {
+                            target_id: best_target,
+                            start_time: track.born_at,
+                            end_time: sim_state.sim_time,
+                            sum_sq_err: 0.0,
+                            count: 0,
+                        }
+                    });
+
+                    metrics.end_time = sim_state.sim_time;
+                    if best_target.is_some() {
+                        metrics.sum_sq_err += min_dist_sq;
+                        metrics.count += 1;
+                        if metrics.target_id.is_none() {
+                            metrics.target_id = best_target;
+                        }
+                    }
+                }
+            }
+
             tracker_state.last_output = Some(output);
         }
     }
@@ -129,6 +170,7 @@ pub fn reset_system(
         tracker_state.last_output = None;
         tracker_state.current_measurements.clear();
         tracker_state.timing_history.clear();
+        tracker_state.all_track_metrics.clear();
         tracing::info!("Simulation reset");
     }
 }

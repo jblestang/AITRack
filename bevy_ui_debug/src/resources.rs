@@ -63,6 +63,21 @@ impl SimState {
 // Tracker state
 // ---------------------------------------------------------------------------
 
+/// Per-track statistical metrics accumulated during the simulation run.
+#[derive(Clone, Debug, Default)]
+pub struct TrackMetrics {
+    /// Associated ground truth target ID (closest target when confirmed)
+    pub target_id: Option<u64>,
+    /// Time the track was born (sim time, s)
+    pub start_time: f64,
+    /// Last time the track was updated (sim time, s)
+    pub end_time: f64,
+    /// Cumulative sum of squared position errors
+    pub sum_sq_err: f64,
+    /// Number of frames this track was evaluated
+    pub count: u64,
+}
+
 /// Tracker state: pipeline + last output.
 #[derive(Resource)]
 pub struct TrackerAppState {
@@ -74,6 +89,8 @@ pub struct TrackerAppState {
     pub current_measurements: Vec<tracker_core::types::Measurement>,
     /// Pipeline timing history (rolling window for display)
     pub timing_history: Vec<u64>,
+    /// Accumulated evaluation metrics for all tracks ever confirmed
+    pub all_track_metrics: std::collections::HashMap<TrackId, TrackMetrics>,
 }
 
 impl TrackerAppState {
@@ -85,6 +102,7 @@ impl TrackerAppState {
             selected_sensor: None,
             current_measurements: Vec::new(),
             timing_history: Vec::new(),
+            all_track_metrics: std::collections::HashMap::new(),
         }
     }
 }

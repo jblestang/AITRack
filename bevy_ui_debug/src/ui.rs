@@ -401,3 +401,114 @@ pub fn ui_cost_overlay(
             }
         });
 }
+
+/// Statistics UI shown after the simulation has finished (or paused at the end).
+pub fn ui_evaluation_panel(
+    mut contexts: EguiContexts,
+    sim_state: Res<SimState>,
+    tracker_state: Res<TrackerAppState>,
+) {
+    if sim_state.sim_time < sim_state.scenario.duration {
+        return; // Only show at the end of the simulation
+    }
+
+    let ctx = match contexts.try_ctx_mut() {
+        Some(c) => c,
+        None => return,
+    };
+
+    let mut open = true;
+    egui::Window::new("Analysis & Statistics")
+        .open(&mut open)
+        .resizable(true)
+        .default_width(600.0)
+        .show(ctx, |ui| {
+            ui.heading("Track Evaluation Diagnostics");
+            ui.label("Per-track RMSE and Lifespan against Ground Truth Targets.");
+            ui.separator();
+
+            // Calculate total target durations
+            use std::collections::HashMap;
+            let mut target_lifespans = HashMap::new();
+            for target in &sim_state.scenario.targets {
+                let start = target.appear_at.unwrap_or(0.0);
+                let end = target.disappear_at.unwrap_or(sim_state.scenario.duration);
+                target_lifespans.insert(target.id, end - start);
+            }
+
+            egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                ui.style_mut().spacing.item_spacing = egui::vec2(10.0, 5.0);
+                
+                // Table header
+                egui::Grid::new("eval_grid")
+                    .striped(true)
+                    .num_columns(5)
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("Track ID").strong());
+                        ui.label(egui::RichText::new("Target ID").strong());
+                        ui.label(egui::RichText::new("RMSE (2D)").strong());
+                        ui.label(egui::RichText::new("Track Life").strong());
+                        ui.label(egui::RichText::new("Continuity %").strong());
+                        ui.end_row();
+
+                        let mut tracks: Vec<_> = tracker_state.all_track_metrics.iter().collect();
+                        tracks.sort_by_key(|(&id, _)| id.0); // Sort by Track ID
+
+                        let mut avg_rmse = 0.0;
+                        let mut avg_continuity = 0.0;
+                        let mut valid_stats_count = 0;
+
+                        for (track_id, metrics) in tracks {
+                            let track_life = (metrics.end_time - metrics.start_time).max(0.0);
+
+                            // Calculate RMSE for this track
+                            let rmse = if metrics.count > 0 {
+                                (metrics.sum_sq_err / metrics.count as f64).sqrt()
+                            } else {
+                                f64::NAN
+                            };
+
+                            let (target_id_str, continuity) = match metrics.target_id {
+                                Some(tid) => {
+                                    let tgt_life = target_lifespans.get(&tid).copied().unwrap_or(sim_state.scenario.duration);
+                                    let cont = (track_life / tgt_life.max(0.001)) * 100.0;
+                                    (format!("Target {}", tid), cont)
+                                }
+                                None => ("None".to_string(), 0.0),
+                            };
+
+                            if metrics.count > 0 {
+                                avg_rmse += rmse;
+                                avg_continuity += continuity;
+                                valid_stats_count += 1;
+                            }
+
+                            ui.label(format!("T{}", track_id.0));
+                            ui.label(target_id_str);
+                            if rmse.is_nan() {
+                                ui.label("-");
+                            } else {
+                                ui.label(format!("{:.2} m", rmse));
+                            }
+                            ui.label(format!("{:.1}s", track_life));
+                            ui.label(format!("{:.1}%", continuity.min(100.0)));
+                            ui.end_row();
+                        }
+
+                        if valid_stats_count > 0 {
+                            avg_rmse /= valid_stats_count as f64;
+                            avg_continuity /= valid_stats_count as f64;
+                        }
+
+                        // Summary row
+                        ui.separator(); ui.separator(); ui.separator(); ui.separator(); ui.separator(); ui.end_row();
+                        ui.label(egui::RichText::new("AVERAGES").strong());
+                        ui.label("-");
+                        ui.label(egui::RichText::new(format!("{:.2} m", avg_rmse)).strong().color(egui::Color32::LIGHT_GREEN));
+                        ui.label("-");
+                        ui.label(egui::RichText::new(format!("{:.1}%", avg_continuity.min(100.0))).strong().color(egui::Color32::LIGHT_GREEN));
+                        ui.end_row();
+                    });
+            });
+        });
+}

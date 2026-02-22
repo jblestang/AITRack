@@ -10,7 +10,7 @@ use crate::{
     },
     resources::{RenderSettings, ResetEvent, SimState, StepEvent, TrackerAppState},
     systems::{advance_simulation_system, keyboard_control_system, reset_system},
-    ui::{ui_control_panel, ui_cost_overlay, ui_timeline_panel, ui_track_inspector},
+    ui::{ui_control_panel, ui_cost_overlay, ui_timeline_panel, ui_track_inspector, ui_evaluation_panel},
 };
 
 /// Main entry point for the interactive debug UI.
@@ -93,6 +93,7 @@ pub fn run_debug_app(kind: ScenarioKind, seed: u64) {
                 ui_timeline_panel,
                 ui_track_inspector,
                 ui_cost_overlay,
+                ui_evaluation_panel,
             )
                 .chain(),
         )
