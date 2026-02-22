@@ -182,6 +182,12 @@ pub fn hungarian_solve(component: &Component, dummy_cost: f64) -> Assignment {
         };
     }
 
+    // Fallback to greedy nearest-neighbor for extremely large components
+    // where the O(N³) Hungarian algorithm becomes a severe bottleneck.
+    if nt.max(nm) > 100 {
+        return greedy_solve(component);
+    }
+
     // Build local cost matrix (nt × nm) — fill with dummy_cost, then overwrite
     // with actual costs from graph edges.
     let n = nt.max(nm);
@@ -235,6 +241,44 @@ pub fn hungarian_solve(component: &Component, dummy_cost: f64) -> Assignment {
     let unmatched_meas: Vec<usize> = (0..nm)
         .filter(|&j| !matched_meas[j])
         .map(|j| component.meas_indices[j])
+        .collect();
+
+    Assignment {
+        pairs,
+        unmatched_tracks,
+        unmatched_meas,
+    }
+}
+
+/// Fallback greedy nearest-neighbor solver for massive components O(E log E).
+fn greedy_solve(component: &Component) -> Assignment {
+    let mut edges = component.edges.clone();
+    // Sort edges by cost ascending
+    edges.sort_unstable_by(|a, b| a.cost.partial_cmp(&b.cost).unwrap());
+
+    let mut matched_tracks = std::collections::HashSet::new();
+    let mut matched_meas = std::collections::HashSet::new();
+    let mut pairs = Vec::new();
+
+    for e in edges {
+        if !matched_tracks.contains(&e.track_idx) && !matched_meas.contains(&e.meas_idx) {
+            pairs.push((e.track_idx, e.meas_idx));
+            matched_tracks.insert(e.track_idx);
+            matched_meas.insert(e.meas_idx);
+        }
+    }
+
+    let unmatched_tracks = component
+        .track_indices
+        .iter()
+        .copied()
+        .filter(|t| !matched_tracks.contains(t))
+        .collect();
+    let unmatched_meas = component
+        .meas_indices
+        .iter()
+        .copied()
+        .filter(|m| !matched_meas.contains(m))
         .collect();
 
     Assignment {

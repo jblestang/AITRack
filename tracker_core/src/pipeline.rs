@@ -277,6 +277,8 @@ impl Pipeline {
                 // Query nearby measurements from grid (O(1) average)
                 let nearby_meas_indices = grid.query_nearby(track.state[0], track.state[1]);
 
+                let mut track_edges = Vec::new();
+
                 for &mi in &nearby_meas_indices {
                     let meas = &measurements[mi];
                     let z = meas.to_cartesian_2d();
@@ -284,13 +286,22 @@ impl Pipeline {
                     let gate =
                         mahalanobis_gate(&track.state, &track.cov, &z, &h, &r, gate_threshold);
                     if gate.passes {
-                        res.edges.push((ti, mi, gate.d2));
-                        if collect {
-                            res.debug_edges.push((track.id, meas.id, gate.d2));
-                        }
-                        res.innovations
-                            .push(((ti, mi), (gate.innovation, gate.innovation_cov)));
+                        track_edges.push((mi, gate, meas.id));
                     }
+                }
+
+                // Prune high-density components by keeping only the top 5 closest measurements.
+                // This breaks apart massive connected graphs, keeping Hungarian O(N³) fast.
+                track_edges.sort_unstable_by(|a, b| a.1.d2.partial_cmp(&b.1.d2).unwrap());
+                track_edges.truncate(5);
+
+                for (mi, gate, meas_id) in track_edges {
+                    res.edges.push((ti, mi, gate.d2));
+                    if collect {
+                        res.debug_edges.push((track.id, meas_id, gate.d2));
+                    }
+                    res.innovations
+                        .push(((ti, mi), (gate.innovation, gate.innovation_cov)));
                 }
 
                 // Compute gate ellipse for display
