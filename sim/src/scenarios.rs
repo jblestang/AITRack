@@ -347,6 +347,7 @@ impl Scenario {
                 ]),
                 appear_at: None,
                 disappear_at: None,
+                history: std::collections::VecDeque::new(),
             },
             Target {
                 id: 1,
@@ -360,6 +361,7 @@ impl Scenario {
                 ]),
                 appear_at: None,
                 disappear_at: None,
+                history: std::collections::VecDeque::new(),
             },
             Target {
                 id: 2,
@@ -381,6 +383,7 @@ impl Scenario {
                 ]),
                 appear_at: None,
                 disappear_at: None,
+                history: std::collections::VecDeque::new(),
             },
             Target {
                 id: 3,
@@ -392,6 +395,7 @@ impl Scenario {
                 ]),
                 appear_at: None,
                 disappear_at: None,
+                history: std::collections::VecDeque::new(),
             },
             // ---- Flight Bravo (from north-east, heading south-west) ----
             Target {
@@ -406,6 +410,7 @@ impl Scenario {
                 ]),
                 appear_at: None,
                 disappear_at: None,
+                history: std::collections::VecDeque::new(),
             },
             Target {
                 id: 5,
@@ -419,6 +424,7 @@ impl Scenario {
                 ]),
                 appear_at: None,
                 disappear_at: None,
+                history: std::collections::VecDeque::new(),
             },
             Target {
                 id: 6,
@@ -440,6 +446,7 @@ impl Scenario {
                 ]),
                 appear_at: None,
                 disappear_at: None,
+                history: std::collections::VecDeque::new(),
             },
             Target {
                 id: 7,
@@ -451,6 +458,7 @@ impl Scenario {
                 ]),
                 appear_at: None,
                 disappear_at: None,
+                history: std::collections::VecDeque::new(),
             },
         ];
 
@@ -531,6 +539,7 @@ impl Scenario {
                     motion,
                     appear_at: None,
                     disappear_at: None,
+                    history: std::collections::VecDeque::new(),
                 }
             })
             .collect();
@@ -581,6 +590,7 @@ fn target(
         motion,
         appear_at,
         disappear_at,
+        history: std::collections::VecDeque::new(),
     }
 }
 

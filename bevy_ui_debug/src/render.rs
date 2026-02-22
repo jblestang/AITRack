@@ -237,5 +237,17 @@ pub fn render_ground_truth_system(
             render.world_to_screen_scale,
         );
         gizmos.line_2d(pos, arrow_end, color.with_alpha(0.5));
+
+        // Ground-truth Trail
+        if render.show_trails {
+            let v: Vec<Vec2> = target
+                .history
+                .iter()
+                .map(|s| world_to_screen(s[0], s[1], render.world_to_screen_scale))
+                .collect();
+            for w in v.windows(2) {
+                gizmos.line_2d(w[0], w[1], color.with_alpha(0.15));
+            }
+        }
     }
 }

@@ -41,11 +41,21 @@ pub struct Target {
     pub disappear_at: Option<f64>,
     /// Optional: target appears after this time (no measurements before)
     pub appear_at: Option<f64>,
+    /// History of past states (for visualization of true trajectory)
+    #[serde(skip)]
+    pub history: std::collections::VecDeque<[f64; 6]>,
 }
 
 impl Target {
     /// Propagate true state by `dt` seconds according to motion spec.
     pub fn step(&mut self, t: f64, dt: f64) {
+        // Record current state before stepping
+        self.history.push_front(self.state);
+        // Keep bounded history (e.g. 500 steps = 50s at 10Hz)
+        if self.history.len() > 500 {
+            self.history.pop_back();
+        }
+
         let s = &mut self.state;
         match &self.motion.clone() {
             MotionSpec::ConstantVelocity => {
@@ -96,13 +106,14 @@ impl Target {
                 // Find last segment whose start time <= t
                 let active = segments.iter().filter(|(t_start, _)| *t_start <= t).last();
                 if let Some((_, spec)) = active {
-                    // Temporarily apply this spec for one step
+                    // Temporarily apply this spec for one step, prevent history duplication
                     let mut tmp = Target {
                         id: 0,
                         state: *s,
                         motion: *spec.clone(),
                         appear_at: None,
                         disappear_at: None,
+                        history: std::collections::VecDeque::new(),
                     };
                     tmp.step(t, dt);
                     *s = tmp.state;
