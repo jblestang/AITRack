@@ -140,13 +140,12 @@ pub fn advance_simulation_system(
                         }
                     });
 
-                    metrics.end_time = sim_state.sim_time;
-                    if best_target.is_some() {
+                    // Only update lifespan and RMSE if legitimately tracking a target (within 500m)
+                    if min_dist_sq < 250_000.0 {
+                        metrics.end_time = sim_state.sim_time;
+                        metrics.target_id = best_target; // dynamic reassignment handles closely-spawned targets
                         metrics.sum_sq_err += min_dist_sq;
                         metrics.count += 1;
-                        if metrics.target_id.is_none() {
-                            metrics.target_id = best_target;
-                        }
                     }
                 }
             }
