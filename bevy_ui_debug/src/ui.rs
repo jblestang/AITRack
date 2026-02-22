@@ -451,23 +451,16 @@ pub fn ui_evaluation_panel(
                         ui.label(egui::RichText::new("Continuity %").strong());
                         ui.end_row();
 
-                        let mut tracks: Vec<_> = tracker_state.all_track_metrics.iter().collect();
-                        tracks.sort_by_key(|(&id, _)| id.0); // Sort by Track ID
+                        let tracks: Vec<_> = tracker_state.all_track_metrics.iter().collect();
 
-                        let mut avg_rmse = 0.0;
-                        let mut avg_continuity = 0.0;
-                        let mut valid_stats_count = 0;
-
-                        for (track_id, metrics) in tracks {
+                        // Pre-compute statistics for sorting
+                        let mut track_data: Vec<_> = tracks.into_iter().map(|(track_id, metrics)| {
                             let track_life = (metrics.end_time - metrics.start_time).max(0.0);
-
-                            // Calculate RMSE for this track
                             let rmse = if metrics.count > 0 {
                                 (metrics.sum_sq_err / metrics.count as f64).sqrt()
                             } else {
                                 f64::NAN
                             };
-
                             let (target_id_str, continuity) = match metrics.target_id {
                                 Some(tid) => {
                                     let tgt_life = target_lifespans.get(&tid).copied().unwrap_or(sim_state.scenario.duration);
@@ -476,7 +469,17 @@ pub fn ui_evaluation_panel(
                                 }
                                 None => ("None".to_string(), 0.0),
                             };
+                            (track_id, metrics, track_life, rmse, target_id_str, continuity)
+                        }).collect();
 
+                        // Sort by continuity descending
+                        track_data.sort_by(|a, b| b.5.partial_cmp(&a.5).unwrap_or(std::cmp::Ordering::Equal));
+
+                        let mut avg_rmse = 0.0;
+                        let mut avg_continuity = 0.0;
+                        let mut valid_stats_count = 0;
+
+                        for (track_id, metrics, track_life, rmse, target_id_str, continuity) in track_data {
                             if metrics.count > 0 {
                                 avg_rmse += rmse;
                                 avg_continuity += continuity;
