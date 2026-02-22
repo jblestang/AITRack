@@ -124,12 +124,12 @@ impl RadarSimulator {
                 }
 
                 // Add noise
-                let noisy_range =
-                    range + self.rng.gen::<f64>() * radar.params.range_noise_std * 2.0
-                        - radar.params.range_noise_std;
+                let noisy_range = range
+                    + self.rng.gen::<f64>() * radar.params.range_noise_std * 2.0
+                    - radar.params.range_noise_std;
                 let noisy_az = azimuth
                     + self.rng.gen::<f64>() * radar.params.azimuth_noise_std * 2.0
-                        - radar.params.azimuth_noise_std;
+                    - radar.params.azimuth_noise_std;
 
                 // Convert to cartesian (with bias injection)
                 let (mx, my) = if radar.params.output_cartesian {
@@ -149,7 +149,8 @@ impl RadarSimulator {
                 // Temporal bias: shift the reported timestamp
                 let reported_time = scan_time + radar.bias.dt0;
 
-                let sigma_xy = range * radar.params.azimuth_noise_std + radar.params.range_noise_std;
+                let sigma_xy =
+                    range * radar.params.azimuth_noise_std + radar.params.range_noise_std;
                 let sigma_sq = sigma_xy * sigma_xy;
 
                 let id = MeasurementId(*meas_id_start);
@@ -158,7 +159,10 @@ impl RadarSimulator {
                 let value = if radar.params.output_cartesian {
                     MeasurementValue::Cartesian2D { x: mx, y: my }
                 } else {
-                    MeasurementValue::Polar2D { range: mx, azimuth: my }
+                    MeasurementValue::Polar2D {
+                        range: mx,
+                        azimuth: my,
+                    }
                 };
 
                 measurements.push(Measurement {
@@ -192,7 +196,8 @@ impl RadarSimulator {
             };
             for _ in 0..n_clutter {
                 let clutter_range = radar.params.max_range * self.rng.gen::<f64>().sqrt();
-                let clutter_az = self.rng.gen::<f64>() * 2.0 * std::f64::consts::PI - std::f64::consts::PI;
+                let clutter_az =
+                    self.rng.gen::<f64>() * 2.0 * std::f64::consts::PI - std::f64::consts::PI;
                 let rpos = radar.params.position;
                 let x = rpos[0] + clutter_range * clutter_az.cos() + radar.bias.dx;
                 let y = rpos[1] + clutter_range * clutter_az.sin() + radar.bias.dy;

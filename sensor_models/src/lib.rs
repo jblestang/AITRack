@@ -3,5 +3,5 @@
 pub mod observation;
 pub mod radar;
 
-pub use observation::{ObservationModel, CartesianXY, PolarObservation};
-pub use radar::{RadarParams};
+pub use observation::{CartesianXY, ObservationModel, PolarObservation};
+pub use radar::RadarParams;

@@ -94,10 +94,7 @@ impl Target {
             }
             MotionSpec::Segmented { segments } => {
                 // Find last segment whose start time <= t
-                let active = segments
-                    .iter()
-                    .filter(|(t_start, _)| *t_start <= t)
-                    .last();
+                let active = segments.iter().filter(|(t_start, _)| *t_start <= t).last();
                 if let Some((_, spec)) = active {
                     // Temporarily apply this spec for one step
                     let mut tmp = Target {
@@ -122,10 +119,14 @@ impl Target {
     /// True if target is active at time `t`.
     pub fn is_active(&self, t: f64) -> bool {
         if let Some(appear) = self.appear_at {
-            if t < appear { return false; }
+            if t < appear {
+                return false;
+            }
         }
         if let Some(disappear) = self.disappear_at {
-            if t >= disappear { return false; }
+            if t >= disappear {
+                return false;
+            }
         }
         true
     }

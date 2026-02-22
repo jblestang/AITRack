@@ -1,11 +1,7 @@
 use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
 use sim::scenarios::{Scenario, ScenarioKind};
-use tracker_core::{
-    kf::CvKfConfig,
-    pipeline::PipelineConfig,
-    track_manager::TrackManagerConfig,
-};
+use tracker_core::{kf::CvKfConfig, pipeline::PipelineConfig, track_manager::TrackManagerConfig};
 
 use crate::{
     render::{
@@ -29,7 +25,9 @@ pub fn run_debug_app(kind: ScenarioKind, seed: u64) {
             // Deep wider gate (20.0 ≈ 99.99% for 2-DOF) to absorb high-G innovations
             gate_threshold: 20.0,
             // Slow CV has moderate noise; fast CV and CT have high noise
-            kf_config: CvKfConfig { process_noise_std: 3.0 },
+            kf_config: CvKfConfig {
+                process_noise_std: 3.0,
+            },
             imm_sigma_fast: 150.0,
             imm_ct_sigma_p: 200.0,
             imm_ct_sigma_v: 100.0,
@@ -89,7 +87,12 @@ pub fn run_debug_app(kind: ScenarioKind, seed: u64) {
         // egui UI panels — must run AFTER EguiSet::InitContexts
         .add_systems(
             Update,
-            (ui_control_panel, ui_timeline_panel, ui_track_inspector, ui_cost_overlay)
+            (
+                ui_control_panel,
+                ui_timeline_panel,
+                ui_track_inspector,
+                ui_cost_overlay,
+            )
                 .chain(),
         )
         .run();

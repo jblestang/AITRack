@@ -2,13 +2,13 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use sim::replay::{save_replay, ReplayLog, GroundTruthFrame, TargetState};
-use sim::scenarios::{Scenario, ScenarioKind};
 use sim::radar_sim::RadarSimulator;
-use tracker_core::pipeline::{Pipeline, PipelineConfig};
-use tracker_core::metrics::TrackingMetrics;
-use tracker_core::types::RadarBatch;
+use sim::replay::{save_replay, GroundTruthFrame, ReplayLog, TargetState};
+use sim::scenarios::{Scenario, ScenarioKind};
 use std::path::PathBuf;
+use tracker_core::metrics::TrackingMetrics;
+use tracker_core::pipeline::{Pipeline, PipelineConfig};
+use tracker_core::types::RadarBatch;
 
 #[derive(Parser)]
 #[command(name = "aittrack", about = "Multi-sensor tracker CLI")]
@@ -51,7 +51,12 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::RunScenario { scenario, seed, output, save_replay: save_path } => {
+        Commands::RunScenario {
+            scenario,
+            seed,
+            output,
+            save_replay: save_path,
+        } => {
             run_scenario(scenario, seed, output.as_deref(), save_path.as_deref())?;
         }
         Commands::Replay { input, output } => {
@@ -80,7 +85,10 @@ fn run_scenario(
     let mut gt_frames: Vec<GroundTruthFrame> = Vec::new();
     let mut metrics = TrackingMetrics::default();
 
-    println!("Running scenario '{}' (seed={}, duration={:.0}s)...", scenario.name, seed, duration);
+    println!(
+        "Running scenario '{}' (seed={}, duration={:.0}s)...",
+        scenario.name, seed, duration
+    );
 
     let start = std::time::Instant::now();
     let mut total_batches = 0;
@@ -95,9 +103,14 @@ fn run_scenario(
         // Record GT
         gt_frames.push(GroundTruthFrame {
             time: sim_time,
-            targets: scenario.targets.iter()
+            targets: scenario
+                .targets
+                .iter()
                 .filter(|t| t.is_active(sim_time))
-                .map(|t| TargetState { id: t.id, state: t.state })
+                .map(|t| TargetState {
+                    id: t.id,
+                    state: t.state,
+                })
                 .collect(),
         });
 
@@ -120,8 +133,16 @@ fn run_scenario(
     );
     println!(
         "Tracks: {} confirmed, {} tentative",
-        pipeline.tracks.iter().filter(|t| t.status == tracker_core::track::TrackStatus::Confirmed).count(),
-        pipeline.tracks.iter().filter(|t| t.status == tracker_core::track::TrackStatus::Tentative).count(),
+        pipeline
+            .tracks
+            .iter()
+            .filter(|t| t.status == tracker_core::track::TrackStatus::Confirmed)
+            .count(),
+        pipeline
+            .tracks
+            .iter()
+            .filter(|t| t.status == tracker_core::track::TrackStatus::Tentative)
+            .count(),
     );
 
     // Save replay if requested
@@ -156,7 +177,11 @@ fn run_scenario(
 
 fn run_replay(input: &std::path::Path, output_path: Option<&std::path::Path>) -> Result<()> {
     let log = sim::replay::load_replay(input)?;
-    println!("Replaying '{}' ({} batches)...", log.scenario_name, log.batches.len());
+    println!(
+        "Replaying '{}' ({} batches)...",
+        log.scenario_name,
+        log.batches.len()
+    );
 
     let mut pipeline = Pipeline::new(PipelineConfig::default());
     let start = std::time::Instant::now();
@@ -166,7 +191,11 @@ fn run_replay(input: &std::path::Path, output_path: Option<&std::path::Path>) ->
     }
 
     let elapsed = start.elapsed();
-    println!("Replay done: {} tracks alive, elapsed={:.2}s", pipeline.tracks.len(), elapsed.as_secs_f64());
+    println!(
+        "Replay done: {} tracks alive, elapsed={:.2}s",
+        pipeline.tracks.len(),
+        elapsed.as_secs_f64()
+    );
 
     if let Some(opath) = output_path {
         let json = serde_json::json!({

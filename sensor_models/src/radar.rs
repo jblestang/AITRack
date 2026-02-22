@@ -32,12 +32,12 @@ impl Default for RadarParams {
         Self {
             position: [0.0, 0.0, 0.0],
             heading: 0.0,
-            max_range: 100_000.0, // 100 km
+            max_range: 100_000.0,           // 100 km
             fov_half: std::f64::consts::PI, // 360° coverage
             p_detection: 0.9,
-            lambda_clutter: 0.5e-6, // 0.5 returns / km² / scan
-            refresh_rate: 1.0,      // 1 Hz default
-            range_noise_std: 50.0,  // 50 m
+            lambda_clutter: 0.5e-6,  // 0.5 returns / km² / scan
+            refresh_rate: 1.0,       // 1 Hz default
+            range_noise_std: 50.0,   // 50 m
             azimuth_noise_std: 0.01, // ~0.6° ≈ 1 mrad
             output_cartesian: true,
         }

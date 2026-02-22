@@ -1,10 +1,10 @@
 //! egui-based UI panels: control bar, timeline, track inspector, metrics.
 
+use crate::resources::{PlayMode, RenderSettings, ResetEvent, SimState, TrackerAppState};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use tracker_core::track::TrackStatus;
 use tracker_core::types::Measurement;
-use crate::resources::{PlayMode, RenderSettings, SimState, TrackerAppState, ResetEvent};
 
 /// Control panel: Play/Pause/Step buttons + speed + scenario info.
 pub fn ui_control_panel(
@@ -49,7 +49,11 @@ pub fn ui_control_panel(
             // Speed multiplier
             ui.label("Speed:");
             let mut speed = sim_state.speed_multiplier;
-            ui.add(egui::Slider::new(&mut speed, 0.125..=32.0).logarithmic(true).text("×"));
+            ui.add(
+                egui::Slider::new(&mut speed, 0.125..=32.0)
+                    .logarithmic(true)
+                    .text("×"),
+            );
             sim_state.speed_multiplier = speed;
 
             ui.separator();
@@ -72,7 +76,10 @@ pub fn ui_control_panel(
             ui.checkbox(&mut render.confirmed_only, "Confirmed only");
             ui.separator();
             ui.label("Scale:");
-            ui.add(egui::Slider::new(&mut render.world_to_screen_scale, 0.0001..=0.02).logarithmic(true));
+            ui.add(
+                egui::Slider::new(&mut render.world_to_screen_scale, 0.0001..=0.02)
+                    .logarithmic(true),
+            );
         });
     });
 }
@@ -91,21 +98,29 @@ pub fn ui_timeline_panel(
         ui.horizontal(|ui| {
             // Progress
             let progress = (sim_state.sim_time / sim_state.scenario.duration) as f32;
-            let bar = egui::ProgressBar::new(progress)
-                .text(format!(
-                    "{:.1}s / {:.1}s",
-                    sim_state.sim_time,
-                    sim_state.scenario.duration
-                ));
+            let bar = egui::ProgressBar::new(progress).text(format!(
+                "{:.1}s / {:.1}s",
+                sim_state.sim_time, sim_state.scenario.duration
+            ));
             ui.add(bar);
 
             ui.separator();
 
             // Track counts
             if let Some(output) = &tracker_state.last_output {
-                let confirmed = output.tracks.iter().filter(|t| t.status == TrackStatus::Confirmed).count();
-                let tentative = output.tracks.iter().filter(|t| t.status == TrackStatus::Tentative).count();
-                ui.label(format!("✅ {confirmed} confirmed  🟡 {tentative} tentative"));
+                let confirmed = output
+                    .tracks
+                    .iter()
+                    .filter(|t| t.status == TrackStatus::Confirmed)
+                    .count();
+                let tentative = output
+                    .tracks
+                    .iter()
+                    .filter(|t| t.status == TrackStatus::Tentative)
+                    .count();
+                ui.label(format!(
+                    "✅ {confirmed} confirmed  🟡 {tentative} tentative"
+                ));
 
                 ui.separator();
 
@@ -156,26 +171,45 @@ pub fn ui_track_inspector(
             };
 
             // Track list
-            ui.collapsing(
-                format!("Tracks ({})", output.tracks.len()),
-                |ui| {
-                    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+            ui.collapsing(format!("Tracks ({})", output.tracks.len()), |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(300.0)
+                    .show(ui, |ui| {
                         for track in &output.tracks {
                             let status_icon = match track.status {
                                 TrackStatus::Confirmed => "✅",
                                 TrackStatus::Tentative => "🟡",
                                 TrackStatus::Deleted => "❌",
                             };
-                            ui.collapsing(format!("{status_icon} {} — hits={} miss={}", track.id, track.total_hits, track.misses), |ui| {
-                                ui.label(format!("pos:  ({:.0}, {:.0}, {:.0}) m", track.state[0], track.state[1], track.state[2]));
-                                ui.label(format!("vel:  ({:.1}, {:.1}, {:.1}) m/s", track.state[3], track.state[4], track.state[5]));
-                                ui.label(format!("P_diag: ({:.1}, {:.1}, {:.1})", track.cov[(0,0)].sqrt(), track.cov[(1,1)].sqrt(), track.cov[(2,2)].sqrt()));
-                                ui.label(format!("age: {:.1}s", sim_state.sim_time - track.born_at));
-                            });
+                            ui.collapsing(
+                                format!(
+                                    "{status_icon} {} — hits={} miss={}",
+                                    track.id, track.total_hits, track.misses
+                                ),
+                                |ui| {
+                                    ui.label(format!(
+                                        "pos:  ({:.0}, {:.0}, {:.0}) m",
+                                        track.state[0], track.state[1], track.state[2]
+                                    ));
+                                    ui.label(format!(
+                                        "vel:  ({:.1}, {:.1}, {:.1}) m/s",
+                                        track.state[3], track.state[4], track.state[5]
+                                    ));
+                                    ui.label(format!(
+                                        "P_diag: ({:.1}, {:.1}, {:.1})",
+                                        track.cov[(0, 0)].sqrt(),
+                                        track.cov[(1, 1)].sqrt(),
+                                        track.cov[(2, 2)].sqrt()
+                                    ));
+                                    ui.label(format!(
+                                        "age: {:.1}s",
+                                        sim_state.sim_time - track.born_at
+                                    ));
+                                },
+                            );
                         }
                     });
-                },
-            );
+            });
 
             ui.separator();
 
@@ -185,13 +219,21 @@ pub fn ui_track_inspector(
                 |ui| {
                     for radar in &sim_state.scenario.radars {
                         ui.collapsing(format!("{}", radar.id), |ui| {
-                            ui.label(format!("pos: ({:.0}, {:.0})", radar.params.position[0], radar.params.position[1]));
+                            ui.label(format!(
+                                "pos: ({:.0}, {:.0})",
+                                radar.params.position[0], radar.params.position[1]
+                            ));
                             ui.label(format!("rate: {:.1} Hz", radar.params.refresh_rate));
                             ui.label(format!("P_D: {:.2}", radar.params.p_detection));
                             ui.label(format!("λ_clutter: {:.2e}", radar.params.lambda_clutter));
-                            ui.label(format!("σ_range: {:.0}m  σ_az: {:.4}rad", radar.params.range_noise_std, radar.params.azimuth_noise_std));
-                            ui.label(format!("Injected bias: dx={:.0}m dy={:.0}m dθ={:.3}rad dt0={:.3}s",
-                                radar.bias.dx, radar.bias.dy, radar.bias.dtheta, radar.bias.dt0));
+                            ui.label(format!(
+                                "σ_range: {:.0}m  σ_az: {:.4}rad",
+                                radar.params.range_noise_std, radar.params.azimuth_noise_std
+                            ));
+                            ui.label(format!(
+                                "Injected bias: dx={:.0}m dy={:.0}m dθ={:.3}rad dt0={:.3}s",
+                                radar.bias.dx, radar.bias.dy, radar.bias.dtheta, radar.bias.dt0
+                            ));
                         });
                     }
                 },
@@ -202,7 +244,15 @@ pub fn ui_track_inspector(
             // Innovation residuals
             ui.collapsing("Innovations", |ui| {
                 for (track_id, innov) in &output.debug.innovations {
-                    ui.label(format!("{}: [{:.1}]", track_id, innov.iter().map(|v| format!("{v:.1}")).collect::<Vec<_>>().join(", ")));
+                    ui.label(format!(
+                        "{}: [{:.1}]",
+                        track_id,
+                        innov
+                            .iter()
+                            .map(|v| format!("{v:.1}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
                 }
                 if output.debug.innovations.is_empty() {
                     ui.label("(none)");
@@ -259,8 +309,12 @@ pub fn ui_cost_overlay(
         None => return,
     };
 
-    let Ok(window) = window_query.get_single() else { return };
-    let Ok((_camera, _camera_transform)) = camera_query.get_single() else { return };
+    let Ok(window) = window_query.get_single() else {
+        return;
+    };
+    let Ok((_camera, _camera_transform)) = camera_query.get_single() else {
+        return;
+    };
 
     let ctx = match contexts.try_ctx_mut() {
         Some(c) => c,
@@ -273,7 +327,13 @@ pub fn ui_cost_overlay(
         .show(ctx, |ui| {
             let screen_size = window.resolution.physical_size();
             // Allocate full-screen rect to paint text anywhere without layout clips
-            ui.allocate_rect(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(screen_size.x as f32, screen_size.y as f32)), egui::Sense::hover());
+            ui.allocate_rect(
+                egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(screen_size.x as f32, screen_size.y as f32),
+                ),
+                egui::Sense::hover(),
+            );
             let painter = ui.painter();
 
             use std::collections::HashMap;
@@ -317,12 +377,18 @@ pub fn ui_cost_overlay(
                     (track_map.get(track_id), meas_map.get(meas_id))
                 {
                     // Convert world coordinates to viewport (screen) coordinates.
-                    let tp = egui::pos2(window.width() / 2.0 + (tx as f32 * render.world_to_screen_scale), window.height() / 2.0 - (ty as f32 * render.world_to_screen_scale));
-                    let mp = egui::pos2(window.width() / 2.0 + (mx as f32 * render.world_to_screen_scale), window.height() / 2.0 - (my as f32 * render.world_to_screen_scale));
+                    let tp = egui::pos2(
+                        window.width() / 2.0 + (tx as f32 * render.world_to_screen_scale),
+                        window.height() / 2.0 - (ty as f32 * render.world_to_screen_scale),
+                    );
+                    let mp = egui::pos2(
+                        window.width() / 2.0 + (mx as f32 * render.world_to_screen_scale),
+                        window.height() / 2.0 - (my as f32 * render.world_to_screen_scale),
+                    );
 
                     let midpoint = egui::pos2((tp.x + mp.x) / 2.0, (tp.y + mp.y) / 2.0);
                     let cost = cost_map.get(&(*track_id, *meas_id)).copied().unwrap_or(0.0);
-                    
+
                     painter.text(
                         midpoint,
                         egui::Align2::CENTER_CENTER,

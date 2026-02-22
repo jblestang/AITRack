@@ -1,9 +1,9 @@
 //! Simulation advance and tracker pipeline systems.
 
+use crate::resources::{PlayMode, ResetEvent, SimState, StepEvent, TrackerAppState};
 use bevy::prelude::*;
-use tracker_core::types::Measurement;
-use crate::resources::{PlayMode, SimState, StepEvent, ResetEvent, TrackerAppState};
 use sim::replay::GroundTruthFrame;
+use tracker_core::types::Measurement;
 
 /// Keyboard input system: Space=play/pause, Period=step, R=reset, =/- = speed.
 pub fn keyboard_control_system(
@@ -74,9 +74,15 @@ pub fn advance_simulation_system(
         // Record ground truth
         let gt_frame = GroundTruthFrame {
             time: sim_state.sim_time,
-            targets: sim_state.scenario.targets.iter()
+            targets: sim_state
+                .scenario
+                .targets
+                .iter()
                 .filter(|t| t.is_active(sim_state.sim_time))
-                .map(|t| sim::replay::TargetState { id: t.id, state: t.state })
+                .map(|t| sim::replay::TargetState {
+                    id: t.id,
+                    state: t.state,
+                })
                 .collect(),
         };
         sim_state.gt_history.push(gt_frame);
@@ -86,11 +92,10 @@ pub fn advance_simulation_system(
         let targets_snapshot = sim_state.scenario.targets.clone();
         let batch_time = sim_state.sim_time;
         let mut meas_id = sim_state.meas_id_counter;
-        let new_batches = sim_state.radar_sim.generate_batches(
-            &targets_snapshot,
-            batch_time,
-            &mut meas_id,
-        );
+        let new_batches =
+            sim_state
+                .radar_sim
+                .generate_batches(&targets_snapshot, batch_time, &mut meas_id);
         sim_state.meas_id_counter = meas_id;
 
         // Process each batch through the tracker

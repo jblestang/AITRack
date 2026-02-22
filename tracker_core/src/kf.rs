@@ -146,7 +146,9 @@ impl KalmanFilter for CvKalmanFilter {
 
         // Kalman gain: K = P·Hᵀ·S⁻¹  (LU for numerical stability)
         let s_lu = s.clone().lu();
-        let s_inv = s_lu.try_inverse().expect("Innovation covariance S is singular");
+        let s_inv = s_lu
+            .try_inverse()
+            .expect("Innovation covariance S is singular");
         let k = &p_dyn * h.transpose() * &s_inv;
 
         // Updated state: x' = x + K·ν
@@ -177,7 +179,7 @@ impl KalmanFilter for CvKalmanFilter {
 mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
-    use nalgebra::{DVector, Vector6};
+    use nalgebra::Vector6;
 
     #[test]
     fn predict_constant_velocity() {

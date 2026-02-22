@@ -47,7 +47,11 @@ impl BipartiteGraph {
 
     /// Add an edge (gate-passed association candidate).
     pub fn add_edge(&mut self, track_idx: usize, meas_idx: usize, cost: f64) {
-        self.edges.push(AssignEdge { track_idx, meas_idx, cost });
+        self.edges.push(AssignEdge {
+            track_idx,
+            meas_idx,
+            cost,
+        });
     }
 
     /// True if no edges exist — all tracks/meas are independent.
@@ -198,7 +202,8 @@ pub fn hungarian_solve(component: &Component, dummy_cost: f64) -> Assignment {
         .collect();
 
     for e in &component.edges {
-        if let (Some(&ri), Some(&ci)) = (track_local.get(&e.track_idx), meas_local.get(&e.meas_idx)) {
+        if let (Some(&ri), Some(&ci)) = (track_local.get(&e.track_idx), meas_local.get(&e.meas_idx))
+        {
             cost[ri * n + ci] = e.cost;
         }
     }
@@ -232,7 +237,11 @@ pub fn hungarian_solve(component: &Component, dummy_cost: f64) -> Assignment {
         .map(|j| component.meas_indices[j])
         .collect();
 
-    Assignment { pairs, unmatched_tracks, unmatched_meas }
+    Assignment {
+        pairs,
+        unmatched_tracks,
+        unmatched_meas,
+    }
 }
 
 /// Core Hungarian algorithm on a square n×n cost matrix (row-major).
@@ -327,7 +336,10 @@ mod tests {
             .enumerate()
             .map(|(r, &c)| cost[r * 3 + c])
             .sum();
-        assert!((total - 5.0).abs() < 1e-9, "Expected total cost 5, got {total}");
+        assert!(
+            (total - 5.0).abs() < 1e-9,
+            "Expected total cost 5, got {total}"
+        );
     }
 
     #[test]
@@ -348,10 +360,26 @@ mod tests {
             track_indices: vec![0, 1],
             meas_indices: vec![0, 1],
             edges: vec![
-                AssignEdge { track_idx: 0, meas_idx: 0, cost: 1.0 },
-                AssignEdge { track_idx: 0, meas_idx: 1, cost: 10.0 },
-                AssignEdge { track_idx: 1, meas_idx: 0, cost: 10.0 },
-                AssignEdge { track_idx: 1, meas_idx: 1, cost: 1.0 },
+                AssignEdge {
+                    track_idx: 0,
+                    meas_idx: 0,
+                    cost: 1.0,
+                },
+                AssignEdge {
+                    track_idx: 0,
+                    meas_idx: 1,
+                    cost: 10.0,
+                },
+                AssignEdge {
+                    track_idx: 1,
+                    meas_idx: 0,
+                    cost: 10.0,
+                },
+                AssignEdge {
+                    track_idx: 1,
+                    meas_idx: 1,
+                    cost: 1.0,
+                },
             ],
         };
         let ass = hungarian_solve(&comp, 100.0);

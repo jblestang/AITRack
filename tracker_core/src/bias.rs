@@ -10,8 +10,8 @@
 //!   coherence of innovations across time.
 //! - **Outlier rejection**: ignore associations with d² > outlier threshold.
 
-use serde::{Deserialize, Serialize};
 use crate::types::SensorId;
+use serde::{Deserialize, Serialize};
 
 /// Spatial bias parameters for a single radar.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

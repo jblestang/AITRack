@@ -1,20 +1,20 @@
 //! Gizmo-based 2D rendering of tracks, measurements, gates, and trails.
 
-use bevy::prelude::*;
 use crate::resources::{RenderSettings, SimState, TrackerAppState};
+use bevy::prelude::*;
 use tracker_core::track::TrackStatus;
 use tracker_core::types::SensorId;
 
 // Radar colors (up to 8 radars)
 const SENSOR_COLORS: [Color; 8] = [
-    Color::srgb(0.2, 0.6, 1.0),   // blue
-    Color::srgb(1.0, 0.35, 0.2),  // red-orange
-    Color::srgb(0.2, 1.0, 0.4),   // green
-    Color::srgb(1.0, 0.9, 0.1),   // yellow
-    Color::srgb(0.9, 0.2, 1.0),   // purple
-    Color::srgb(0.1, 0.9, 0.9),   // cyan
-    Color::srgb(1.0, 0.5, 0.0),   // orange
-    Color::srgb(1.0, 1.0, 1.0),   // white
+    Color::srgb(0.2, 0.6, 1.0),  // blue
+    Color::srgb(1.0, 0.35, 0.2), // red-orange
+    Color::srgb(0.2, 1.0, 0.4),  // green
+    Color::srgb(1.0, 0.9, 0.1),  // yellow
+    Color::srgb(0.9, 0.2, 1.0),  // purple
+    Color::srgb(0.1, 0.9, 0.9),  // cyan
+    Color::srgb(1.0, 0.5, 0.0),  // orange
+    Color::srgb(1.0, 1.0, 1.0),  // white
 ];
 
 fn sensor_color(id: &SensorId) -> Color {
@@ -122,7 +122,11 @@ pub fn render_gates_system(
         None => return,
     };
     for ellipse in &output.debug.gate_ellipses {
-        let center = world_to_screen(ellipse.center.0, ellipse.center.1, render.world_to_screen_scale);
+        let center = world_to_screen(
+            ellipse.center.0,
+            ellipse.center.1,
+            render.world_to_screen_scale,
+        );
         let rx = ellipse.semi_x as f32 * render.world_to_screen_scale;
         let ry = ellipse.semi_y as f32 * render.world_to_screen_scale;
         // Draw as approximated circle using the larger semi-axis
@@ -165,8 +169,7 @@ pub fn render_associations_system(
         .collect();
 
     for (track_id, meas_id) in &output.debug.assignments {
-        if let (Some(&(tx, ty)), Some(&(mx, my))) =
-            (track_map.get(track_id), meas_map.get(meas_id))
+        if let (Some(&(tx, ty)), Some(&(mx, my))) = (track_map.get(track_id), meas_map.get(meas_id))
         {
             let tp = world_to_screen(tx, ty, render.world_to_screen_scale);
             let mp = world_to_screen(mx, my, render.world_to_screen_scale);

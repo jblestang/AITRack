@@ -111,7 +111,7 @@ pub fn mahalanobis_gate(
     let d2 = match s_lu.try_inverse() {
         Some(s_inv) => {
             let v = &s_inv * &innovation;
-            (&innovation).dot(&v)
+            innovation.dot(&v)
         }
         None => f64::INFINITY, // degenerate case — reject
     };
@@ -140,7 +140,11 @@ pub fn compute_gate_ellipse(
     // Extract 2×2 top-left block of S for 2D projection
     let s00 = s[(0, 0)].max(0.0);
     let s11 = s[(1, 1)].max(0.0);
-    let s01 = if s.nrows() > 1 && s.ncols() > 1 { s[(0, 1)] } else { 0.0 };
+    let s01 = if s.nrows() > 1 && s.ncols() > 1 {
+        s[(0, 1)]
+    } else {
+        0.0
+    };
 
     // Eigenvalues of 2×2: λ = (s00+s11)/2 ± sqrt(((s00-s11)/2)² + s01²)
     let mean = (s00 + s11) / 2.0;

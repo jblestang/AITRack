@@ -60,13 +60,21 @@ impl TrackingMetrics {
     /// Precision = TP / (TP + FP)
     pub fn precision(&self) -> f64 {
         let denom = (self.true_positives + self.false_positives) as f64;
-        if denom == 0.0 { 1.0 } else { self.true_positives as f64 / denom }
+        if denom == 0.0 {
+            1.0
+        } else {
+            self.true_positives as f64 / denom
+        }
     }
 
     /// Recall = TP / (TP + FN)
     pub fn recall(&self) -> f64 {
         let denom = (self.true_positives + self.false_negatives) as f64;
-        if denom == 0.0 { 1.0 } else { self.true_positives as f64 / denom }
+        if denom == 0.0 {
+            1.0
+        } else {
+            self.true_positives as f64 / denom
+        }
     }
 
     /// Accumulate one frame's worth of associations.
@@ -87,7 +95,8 @@ impl TrackingMetrics {
         for assoc in associations {
             if let Some(gt) = gt_map.get(&assoc.target_id) {
                 // Find track state
-                if let Some((_, state)) = track_states.iter().find(|(id, _)| *id == assoc.track_id) {
+                if let Some((_, state)) = track_states.iter().find(|(id, _)| *id == assoc.track_id)
+                {
                     let dx = state[0] - gt.state[0];
                     let dy = state[1] - gt.state[1];
                     let dvx = state[3] - gt.state[3];

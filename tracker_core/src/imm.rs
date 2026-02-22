@@ -27,7 +27,11 @@ pub struct CtKalmanFilter {
 
 impl CtKalmanFilter {
     pub fn new(omega: f64, sigma_p: f64, sigma_v: f64) -> Self {
-        Self { omega, sigma_p, sigma_v }
+        Self {
+            omega,
+            sigma_p,
+            sigma_v,
+        }
     }
 
     pub fn transition_matrix(omega: f64, dt: f64) -> Matrix6<f64> {
@@ -69,9 +73,18 @@ impl CtKalmanFilter {
         (new_state, new_cov)
     }
 
-    pub fn update(&self, state: &StateVec, cov: &StateCov, z: &DVec, h: &DMat, r: &DMat) -> KfUpdateResult {
+    pub fn update(
+        &self,
+        state: &StateVec,
+        cov: &StateCov,
+        z: &DVec,
+        h: &DMat,
+        r: &DMat,
+    ) -> KfUpdateResult {
         // Linear update (H is independent of omega)
-        let kf = CvKalmanFilter::new(CvKfConfig { process_noise_std: 0.0 });
+        let kf = CvKalmanFilter::new(CvKfConfig {
+            process_noise_std: 0.0,
+        });
         kf.update(state, cov, z, h, r)
     }
 }
@@ -110,10 +123,30 @@ impl ImmState {
         ];
 
         let models = vec![
-            ImmModel { name: "CV-st", prob: 0.50, state, cov },
-            ImmModel { name: "CV-ag", prob: 0.20, state, cov },
-            ImmModel { name: "CT-L",  prob: 0.15, state, cov },
-            ImmModel { name: "CT-R",  prob: 0.15, state, cov },
+            ImmModel {
+                name: "CV-st",
+                prob: 0.50,
+                state,
+                cov,
+            },
+            ImmModel {
+                name: "CV-ag",
+                prob: 0.20,
+                state,
+                cov,
+            },
+            ImmModel {
+                name: "CT-L",
+                prob: 0.15,
+                state,
+                cov,
+            },
+            ImmModel {
+                name: "CT-R",
+                prob: 0.15,
+                state,
+                cov,
+            },
         ];
 
         Self {
@@ -136,16 +169,16 @@ impl ImmState {
 
         // Predict each model
         self.models[0].state = kf_st.predict(&mixed[0].0, &mixed[0].1, dt).0;
-        self.models[0].cov   = kf_st.predict(&mixed[0].0, &mixed[0].1, dt).1;
+        self.models[0].cov = kf_st.predict(&mixed[0].0, &mixed[0].1, dt).1;
 
         self.models[1].state = kf_ag.predict(&mixed[1].0, &mixed[1].1, dt).0;
-        self.models[1].cov   = kf_ag.predict(&mixed[1].0, &mixed[1].1, dt).1;
+        self.models[1].cov = kf_ag.predict(&mixed[1].0, &mixed[1].1, dt).1;
 
         self.models[2].state = kf_ctl.predict(&mixed[2].0, &mixed[2].1, dt).0;
-        self.models[2].cov   = kf_ctl.predict(&mixed[2].0, &mixed[2].1, dt).1;
+        self.models[2].cov = kf_ctl.predict(&mixed[2].0, &mixed[2].1, dt).1;
 
         self.models[3].state = kf_ctr.predict(&mixed[3].0, &mixed[3].1, dt).0;
-        self.models[3].cov   = kf_ctr.predict(&mixed[3].0, &mixed[3].1, dt).1;
+        self.models[3].cov = kf_ctr.predict(&mixed[3].0, &mixed[3].1, dt).1;
 
         // Propagate probabilities
         let old_probs: Vec<f64> = self.models.iter().map(|m| m.prob).collect();
@@ -159,6 +192,7 @@ impl ImmState {
         self.fuse();
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
         z: &DVec,
@@ -191,8 +225,8 @@ impl ImmState {
             .sum::<f64>()
             .max(1e-30);
 
-        for j in 0..N_MODELS {
-            self.models[j].prob = (likelihoods[j] * self.models[j].prob / total).max(1e-10);
+        for (j, like) in likelihoods.iter().enumerate().take(N_MODELS) {
+            self.models[j].prob = (like * self.models[j].prob / total).max(1e-10);
         }
         self.normalise_probs();
         self.fuse();
@@ -201,7 +235,9 @@ impl ImmState {
     fn interaction(&self) -> Vec<(StateVec, StateCov)> {
         let mut mixed = Vec::with_capacity(N_MODELS);
         for j in 0..N_MODELS {
-            let c_bar: f64 = (0..N_MODELS).map(|i| self.transition[i][j] * self.models[i].prob).sum();
+            let c_bar: f64 = (0..N_MODELS)
+                .map(|i| self.transition[i][j] * self.models[i].prob)
+                .sum();
             let c_bar = c_bar.max(1e-30);
 
             let mut x_mix = StateVec::zeros();
@@ -224,8 +260,10 @@ impl ImmState {
 
     fn fuse(&mut self) {
         let mut x_fused = StateVec::zeros();
-        for m in &self.models { x_fused += m.state * m.prob; }
-        
+        for m in &self.models {
+            x_fused += m.state * m.prob;
+        }
+
         let mut p_fused = StateCov::zeros();
         for m in &self.models {
             p_fused += m.cov * m.prob;
@@ -239,19 +277,30 @@ impl ImmState {
     fn normalise_probs(&mut self) {
         let sum: f64 = self.models.iter().map(|m| m.prob).sum();
         let sum = sum.max(1e-30);
-        for m in &mut self.models { m.prob /= sum; }
+        for m in &mut self.models {
+            m.prob /= sum;
+        }
     }
 
     pub fn dominant_model(&self) -> &'static str {
-        self.models.iter().max_by(|a, b| a.prob.partial_cmp(&b.prob).unwrap()).unwrap().name
+        self.models
+            .iter()
+            .max_by(|a, b| a.prob.partial_cmp(&b.prob).unwrap())
+            .unwrap()
+            .name
     }
 }
 
 fn gaussian_likelihood(innovation: &DVec, s: &DMat) -> f64 {
     let dim = innovation.len();
     let det = s.determinant().abs();
-    if det < 1e-30 { return 1e-30; }
-    let s_inv = s.clone().try_inverse().unwrap_or_else(|| DMatrix::identity(dim, dim));
+    if det < 1e-30 {
+        return 1e-30;
+    }
+    let s_inv = s
+        .clone()
+        .try_inverse()
+        .unwrap_or_else(|| DMatrix::identity(dim, dim));
     let maha2 = (innovation.transpose() * &s_inv * innovation)[0];
     let norm = ((2.0 * std::f64::consts::PI).powi(dim as i32) * det).sqrt();
     (-0.5 * maha2).exp() / norm
@@ -269,8 +318,12 @@ mod tests {
         let cov = StateCov::identity() * 100.0;
         let mut imm = ImmState::new(state, cov);
 
-        let kf_st = CvKalmanFilter::new(CvKfConfig { process_noise_std: 1.0 });
-        let kf_ag = CvKalmanFilter::new(CvKfConfig { process_noise_std: 30.0 });
+        let kf_st = CvKalmanFilter::new(CvKfConfig {
+            process_noise_std: 1.0,
+        });
+        let kf_ag = CvKalmanFilter::new(CvKfConfig {
+            process_noise_std: 30.0,
+        });
         let kf_ctl = CtKalmanFilter::new(0.3, 10.0, 5.0);
         let kf_ctr = CtKalmanFilter::new(-0.3, 10.0, 5.0);
 
@@ -286,22 +339,29 @@ mod tests {
         let cov = StateCov::identity() * 100.0;
         let mut imm = ImmState::new(state, cov);
 
-        let kf_st = CvKalmanFilter::new(CvKfConfig { process_noise_std: 1.0 });
-        let kf_ag = CvKalmanFilter::new(CvKfConfig { process_noise_std: 30.0 });
+        let kf_st = CvKalmanFilter::new(CvKfConfig {
+            process_noise_std: 1.0,
+        });
+        let kf_ag = CvKalmanFilter::new(CvKfConfig {
+            process_noise_std: 30.0,
+        });
         let kf_ctl = CtKalmanFilter::new(0.2, 10.0, 5.0);
         let kf_ctr = CtKalmanFilter::new(-0.2, 10.0, 5.0);
-        
-        let h = DMatrix::from_row_slice(2, 6, &[1.,0.,0.,0.,0.,0., 0.,1.,0.,0.,0.,0.]);
+
+        let h = DMatrix::from_row_slice(2, 6, &[1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0.]);
         let r = DMatrix::from_diagonal(&DVector::from_vec(vec![1000.0, 1000.0]));
 
         let omega = 0.2f64;
         let dt = 0.5;
-        let mut tx = 0.0f64; let mut ty = 0.0f64; let mut tvx = 200.0f64; let mut tvy = 0.0f64;
+        let mut tx = 0.0f64;
+        let mut ty = 0.0f64;
+        let mut tvx = 200.0f64;
+        let mut tvy = 0.0f64;
 
         for _ in 0..20 {
             let heading = tvy.atan2(tvx);
             let nh = heading + omega * dt;
-            let v = (tvx*tvx + tvy*tvy).sqrt();
+            let v = (tvx * tvx + tvy * tvy).sqrt();
             tx += v * heading.cos() * dt;
             ty += v * heading.sin() * dt;
             tvx = v * nh.cos();
@@ -314,6 +374,9 @@ mod tests {
 
         let ctl_prob = imm.models[2].prob;
         let st_prob = imm.models[0].prob;
-        assert!(ctl_prob > st_prob, "CT-L should dominate, got L={ctl_prob:.3} ST={st_prob:.3}");
+        assert!(
+            ctl_prob > st_prob,
+            "CT-L should dominate, got L={ctl_prob:.3} ST={st_prob:.3}"
+        );
     }
 }

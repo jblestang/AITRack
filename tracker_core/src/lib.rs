@@ -24,4 +24,6 @@ pub mod types;
 
 pub use pipeline::{Pipeline, PipelineConfig, PipelineDebugData, PipelineOutput};
 pub use track::{Track, TrackStatus};
-pub use types::{Measurement, MeasurementId, MeasurementValue, SensorId, StateVec, StateCov, TrackId};
+pub use types::{
+    Measurement, MeasurementId, MeasurementValue, SensorId, StateCov, StateVec, TrackId,
+};

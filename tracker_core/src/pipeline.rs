@@ -14,20 +14,18 @@
 //! 11. Collect debug data for UI
 
 use crate::{
-    association::{
-        partition_components, BipartiteGraph, hungarian_solve,
-    },
+    association::{hungarian_solve, partition_components, BipartiteGraph},
     bias::BiasEstimator,
-    gating::{compute_gate_ellipse, mahalanobis_gate, GatingEllipse, CHI2_99, SpatialGrid},
+    gating::{compute_gate_ellipse, mahalanobis_gate, GatingEllipse, SpatialGrid, CHI2_99},
     imm::CtKalmanFilter,
     kf::{CvKalmanFilter, CvKfConfig, KalmanFilter},
     track::{Track, TrackStatus},
     track_manager::{TrackManager, TrackManagerConfig},
     types::{DMat, DVec, Measurement, MeasurementId, RadarBatch, TrackId},
 };
-use nalgebra::{DMatrix, DVector};
-use std::collections::HashMap;
-use std::time::Instant;
+use nalgebra::{DMatrix, DVector, Vector6};
+use rayon::prelude::*;
+use std::{collections::HashMap, time::Instant};
 
 // ---------------------------------------------------------------------------
 // Config
@@ -124,10 +122,7 @@ pub struct PipelineOutput {
 
 /// Build 2×6 observation matrix H for cartesian XY measurement.
 fn h_cartesian_2d() -> DMat {
-    DMatrix::from_row_slice(2, 6, &[
-        1., 0., 0., 0., 0., 0.,
-        0., 1., 0., 0., 0., 0.,
-    ])
+    DMatrix::from_row_slice(2, 6, &[1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0.])
 }
 
 // ---------------------------------------------------------------------------
@@ -155,7 +150,9 @@ impl Pipeline {
     /// Create a new pipeline.
     pub fn new(config: PipelineConfig) -> Self {
         let kf = CvKalmanFilter::new(config.kf_config.clone());
-        let kf_fast = CvKalmanFilter::new(CvKfConfig { process_noise_std: config.imm_sigma_fast });
+        let kf_fast = CvKalmanFilter::new(CvKfConfig {
+            process_noise_std: config.imm_sigma_fast,
+        });
         let kf_ctl = CtKalmanFilter::new(0.3, config.imm_ct_sigma_p, config.imm_ct_sigma_v);
         let kf_ctr = CtKalmanFilter::new(-0.3, config.imm_ct_sigma_p, config.imm_ct_sigma_v);
         let track_manager = TrackManager::new(config.track_manager_config.clone());
@@ -203,27 +200,32 @@ impl Pipeline {
         let batch_time = sensor_bias.correct_timestamp(batch.sensor_time);
 
         // ----------------------------------------------------------------
-        // Step 2: Predict all tracks to batch_time
+        // Step 2: Predict all tracks to batch_time (Parallel)
         // ----------------------------------------------------------------
         let t0 = Instant::now();
-        for track in &mut self.tracks {
-            if track.status == TrackStatus::Deleted {
-                continue;
-            }
-            let dt = (batch_time - track.last_updated).max(0.0);
-            if dt > 0.0 {
-                if let Some(imm) = &mut track.imm {
-                    // IMM predict: mixing + per-model predict + fuse
-                    imm.predict(dt, &self.kf, &self.kf_fast, &self.kf_ctl, &self.kf_ctr);
-                    track.state = imm.fused_state;
-                    track.cov  = imm.fused_cov;
-                } else {
-                    let (new_state, new_cov) = self.kf.predict(&track.state, &track.cov, dt);
-                    track.state = new_state;
-                    track.cov = new_cov;
+        // Borrow KFs locally to use in par_iter_mut closure
+        let kf = &self.kf;
+        let kf_fast = &self.kf_fast;
+        let kf_ctl = &self.kf_ctl;
+        let kf_ctr = &self.kf_ctr;
+
+        self.tracks.par_iter_mut().for_each(|track| {
+            if track.status != TrackStatus::Deleted {
+                let dt = (batch_time - track.last_updated).max(0.0);
+                if dt > 0.0 {
+                    if let Some(imm) = &mut track.imm {
+                        // IMM predict: mixing + per-model predict + fuse
+                        imm.predict(dt, kf, kf_fast, kf_ctl, kf_ctr);
+                        track.state = imm.fused_state;
+                        track.cov = imm.fused_cov;
+                    } else {
+                        let (new_state, new_cov) = kf.predict(&track.state, &track.cov, dt);
+                        track.state = new_state;
+                        track.cov = new_cov;
+                    }
                 }
             }
-        }
+        });
         debug.timing_predict_us = t0.elapsed().as_micros() as u64;
 
         // ----------------------------------------------------------------
@@ -237,7 +239,6 @@ impl Pipeline {
 
         // We also pre-compute innovations to avoid re-computation in KF update
         // key: (track_idx, meas_idx)
-        let mut innovation_cache: HashMap<(usize, usize), (DVec, DMat)> = HashMap::new();
 
         // Build spatial grid for measurements (O(M))
         let mut grid = SpatialGrid::new(5000.0);
@@ -250,43 +251,77 @@ impl Pipeline {
             .filter(|&i| self.tracks[i].status != TrackStatus::Deleted)
             .collect();
 
-        for &ti in &live_track_indices {
-            let track = &self.tracks[ti];
-            
-            // Query nearby measurements from grid (O(1) average)
-            let nearby_meas_indices = grid.query_nearby(track.state[0], track.state[1]);
-
-            for mi in nearby_meas_indices {
-                let meas = &measurements[mi];
-                let z = meas.to_cartesian_2d();
-                let r = meas.noise_cov_matrix();
-                let gate = mahalanobis_gate(
-                    &track.state,
-                    &track.cov,
-                    &z,
-                    &h,
-                    &r,
-                    self.config.gate_threshold,
-                );
-                if gate.passes {
-                    graph.add_edge(ti, mi, gate.d2);
-                    if collect {
-                        debug.gate_edges.push((track.id, meas.id, gate.d2));
-                    }
-                    innovation_cache.insert((ti, mi), (gate.innovation, gate.innovation_cov));
-                }
-            }
-            // Compute gate ellipse for display
-            if collect {
-                let r = if measurements.is_empty() {
-                    DMatrix::from_diagonal(&DVector::from_vec(vec![100.0, 100.0]))
-                } else {
-                    measurements[0].noise_cov_matrix()
-                };
-                let ellipse = compute_gate_ellipse(&track.state, &track.cov, &h, &r, ti, 3.0);
-                debug.gate_ellipses.push(ellipse);
-            }
+        // Used to hold results computed concurrently
+        #[derive(Default)]
+        struct GateResult {
+            edges: Vec<(usize, usize, f64)>, // (ti, mi, d2)
+            debug_edges: Vec<(TrackId, MeasurementId, f64)>,
+            innovations: Vec<((usize, usize), (DVec, DMat))>,
+            ellipses: Vec<GatingEllipse>,
         }
+
+        // Parallel gating over all live tracks
+        let gate_threshold = self.config.gate_threshold;
+        let r_default = if measurements.is_empty() {
+            DMatrix::from_diagonal(&DVector::from_vec(vec![100.0, 100.0]))
+        } else {
+            measurements[0].noise_cov_matrix()
+        };
+
+        let gate_results: Vec<GateResult> = live_track_indices
+            .par_iter()
+            .map(|&ti| {
+                let track = &self.tracks[ti];
+                let mut res = GateResult::default();
+
+                // Query nearby measurements from grid (O(1) average)
+                let nearby_meas_indices = grid.query_nearby(track.state[0], track.state[1]);
+
+                for &mi in &nearby_meas_indices {
+                    let meas = &measurements[mi];
+                    let z = meas.to_cartesian_2d();
+                    let r = meas.noise_cov_matrix();
+                    let gate =
+                        mahalanobis_gate(&track.state, &track.cov, &z, &h, &r, gate_threshold);
+                    if gate.passes {
+                        res.edges.push((ti, mi, gate.d2));
+                        if collect {
+                            res.debug_edges.push((track.id, meas.id, gate.d2));
+                        }
+                        res.innovations
+                            .push(((ti, mi), (gate.innovation, gate.innovation_cov)));
+                    }
+                }
+
+                // Compute gate ellipse for display
+                if collect {
+                    let r = if nearby_meas_indices.is_empty() {
+                        &r_default
+                    } else {
+                        &measurements[nearby_meas_indices[0]].noise_cov_matrix()
+                    };
+                    let ellipse = compute_gate_ellipse(&track.state, &track.cov, &h, r, ti, 3.0);
+                    res.ellipses.push(ellipse);
+                }
+
+                res
+            })
+            .collect();
+
+        // Accumulate results
+        let mut innovation_cache: HashMap<(usize, usize), (DVec, DMat)> =
+            HashMap::with_capacity(gate_results.iter().map(|r| r.innovations.len()).sum());
+        for res in gate_results {
+            for (ti, mi, d2) in res.edges {
+                graph.add_edge(ti, mi, d2);
+            }
+            if collect {
+                debug.gate_edges.extend(res.debug_edges);
+                debug.gate_ellipses.extend(res.ellipses);
+            }
+            innovation_cache.extend(res.innovations);
+        }
+
         debug.timing_gate_us = t0.elapsed().as_micros() as u64;
 
         // ----------------------------------------------------------------
@@ -310,11 +345,17 @@ impl Pipeline {
                 .collect();
         }
 
-        for comp in &components {
-            let ass = hungarian_solve(comp, self.config.dummy_cost);
-            all_assignments.extend(ass.pairs.iter().copied());
-            all_unmatched_tracks.extend(ass.unmatched_tracks.iter().copied());
-            all_unmatched_meas.extend(ass.unmatched_meas.iter().copied());
+        // Parallel Hungarian assignment over disconnected components
+        let dummy_cost = self.config.dummy_cost;
+        let assignment_results: Vec<_> = components
+            .par_iter()
+            .map(|comp| hungarian_solve(comp, dummy_cost))
+            .collect();
+
+        for ass in assignment_results {
+            all_assignments.extend(ass.pairs);
+            all_unmatched_tracks.extend(ass.unmatched_tracks);
+            all_unmatched_meas.extend(ass.unmatched_meas);
         }
 
         // Tracks not in any component are all unmatched (no measurements near them)
@@ -330,7 +371,8 @@ impl Pipeline {
         // Step 7: KF update for matched pairs
         // ----------------------------------------------------------------
         let t0 = Instant::now();
-        let mut matched_meas_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut matched_meas_indices: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
         let h_ref = &h;
         let mut confirmations = 0;
 
@@ -343,14 +385,24 @@ impl Pipeline {
 
             if let Some(imm) = &mut track.imm {
                 // IMM update: per-model update + likelihood weighting + fuse
-                imm.update(&z, h_ref, &r, &self.kf, &self.kf_fast, &self.kf_ctl, &self.kf_ctr);
+                imm.update(
+                    &z,
+                    h_ref,
+                    &r,
+                    &self.kf,
+                    &self.kf_fast,
+                    &self.kf_ctl,
+                    &self.kf_ctr,
+                );
                 track.state = imm.fused_state;
                 track.cov = imm.fused_cov;
 
                 if collect {
-                    let innov = z.clone() - h_ref * nalgebra::DVector::from_iterator(
-                        6, track.state.iter().copied());
-                    debug.innovations.push((track.id, innov.iter().copied().collect()));
+                    let innov = z.clone()
+                        - h_ref * nalgebra::DVector::from_iterator(6, track.state.iter().copied());
+                    debug
+                        .innovations
+                        .push((track.id, innov.iter().copied().collect()));
                     debug.assignments.push((track.id, meas.id));
                 }
             } else {
@@ -359,10 +411,9 @@ impl Pipeline {
                 track.cov = res.cov;
                 if collect {
                     debug.assignments.push((track.id, meas.id));
-                    debug.innovations.push((
-                        track.id,
-                        res.innovation.iter().copied().collect(),
-                    ));
+                    debug
+                        .innovations
+                        .push((track.id, res.innovation.iter().copied().collect()));
                 }
             }
 
@@ -468,7 +519,10 @@ mod tests {
         // Second batch: same 2 targets, moved slightly
         let batch2 = make_batch(0, 1.0, &[(101.0, 200.0), (301.0, 401.0)]);
         let out2 = pipeline.process_batch(&batch2);
-        assert!(out2.births == 0 || out2.births <= 2, "Existing tracks should absorb measurements");
+        assert!(
+            out2.births == 0 || out2.births <= 2,
+            "Existing tracks should absorb measurements"
+        );
     }
 
     #[test]
@@ -487,10 +541,14 @@ mod tests {
             pipeline.process_batch(&batch);
         }
 
-        let confirmed = pipeline.tracks
+        let confirmed = pipeline
+            .tracks
             .iter()
             .filter(|t| t.status == TrackStatus::Confirmed)
             .count();
-        assert!(confirmed >= 1, "At least one track should be confirmed after 5 frames");
+        assert!(
+            confirmed >= 1,
+            "At least one track should be confirmed after 5 frames"
+        );
     }
 }

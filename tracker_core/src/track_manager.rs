@@ -67,7 +67,7 @@ impl TrackManager {
         let pos = meas.to_cartesian_2d();
         let state = Vector6::new(
             pos[0], pos[1], 0.0, // zero z
-            0.0, 0.0, 0.0,     // zero initial velocity
+            0.0, 0.0, 0.0, // zero initial velocity
         );
         let ps = self.config.init_pos_std * self.config.init_pos_std;
         let vs = self.config.init_vel_std * self.config.init_vel_std;
@@ -117,7 +117,10 @@ mod tests {
 
     #[test]
     fn tentative_confirms_after_m_hits() {
-        let cfg = TrackManagerConfig { confirm_m: 3, ..Default::default() };
+        let cfg = TrackManagerConfig {
+            confirm_m: 3,
+            ..Default::default()
+        };
         let mgr = TrackManager::new(cfg);
         let state = Vector6::zeros();
         let cov = StateCov::identity();
@@ -127,9 +130,17 @@ mod tests {
 
         assert_eq!(track.status, TrackStatus::Tentative);
         mgr.register_hit(&mut track); // hits = 2
-        assert_eq!(track.status, TrackStatus::Tentative, "Not confirmed yet at hit 2");
+        assert_eq!(
+            track.status,
+            TrackStatus::Tentative,
+            "Not confirmed yet at hit 2"
+        );
         mgr.register_hit(&mut track); // hits = 3 >= confirm_m=3 => confirmed
-        assert_eq!(track.status, TrackStatus::Confirmed, "Should be confirmed at hit 3");
+        assert_eq!(
+            track.status,
+            TrackStatus::Confirmed,
+            "Should be confirmed at hit 3"
+        );
     }
 
     #[test]
@@ -147,8 +158,16 @@ mod tests {
         mgr.register_miss(&mut track); // misses=1, limit=3, not deleted
         mgr.register_miss(&mut track); // misses=2
         mgr.register_miss(&mut track); // misses=3, still not deleted (> 3 is false)
-        assert_eq!(track.status, TrackStatus::Confirmed, "Still alive at 3 misses (limit=3, delete when > 3)");
+        assert_eq!(
+            track.status,
+            TrackStatus::Confirmed,
+            "Still alive at 3 misses (limit=3, delete when > 3)"
+        );
         mgr.register_miss(&mut track); // misses=4 > 3 => deleted
-        assert_eq!(track.status, TrackStatus::Deleted, "Deleted after miss > limit");
+        assert_eq!(
+            track.status,
+            TrackStatus::Deleted,
+            "Deleted after miss > limit"
+        );
     }
 }

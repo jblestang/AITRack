@@ -42,10 +42,7 @@ impl CartesianXY {
 impl ObservationModel for CartesianXY {
     fn h_matrix(&self, _state: &[f64; 6]) -> DMat {
         // Linear: z = [px, py]
-        DMatrix::from_row_slice(2, 6, &[
-            1., 0., 0., 0., 0., 0.,
-            0., 1., 0., 0., 0., 0.,
-        ])
+        DMatrix::from_row_slice(2, 6, &[1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0.])
     }
 
     fn r_matrix(&self) -> DMat {
@@ -78,7 +75,11 @@ pub struct PolarObservation {
 
 impl PolarObservation {
     pub fn new(radar_pos: [f64; 2], sigma_r: f64, sigma_az: f64) -> Self {
-        Self { radar_pos, sigma_r, sigma_az }
+        Self {
+            radar_pos,
+            sigma_r,
+            sigma_az,
+        }
     }
 
     /// Convert polar [range, az] to cartesian [x, y] relative to world origin.
@@ -108,10 +109,24 @@ impl ObservationModel for PolarObservation {
 
         // ∂range/∂px = dx/r,   ∂range/∂py = dy/r,   others = 0
         // ∂az/∂px = -dy/r²,    ∂az/∂py = dx/r²,     others = 0
-        DMatrix::from_row_slice(2, 6, &[
-             dx / r,  dy / r,  0., 0., 0., 0.,
-            -dy / r2,  dx / r2, 0., 0., 0., 0.,
-        ])
+        DMatrix::from_row_slice(
+            2,
+            6,
+            &[
+                dx / r,
+                dy / r,
+                0.,
+                0.,
+                0.,
+                0.,
+                -dy / r2,
+                dx / r2,
+                0.,
+                0.,
+                0.,
+                0.,
+            ],
+        )
     }
 
     fn r_matrix(&self) -> DMat {

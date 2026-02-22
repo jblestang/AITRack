@@ -95,6 +95,9 @@ impl Track {
 
     /// Name of the dominant IMM model (or "CV" if IMM not active).
     pub fn motion_label(&self) -> &'static str {
-        self.imm.as_ref().map(|i| i.dominant_model()).unwrap_or("CV")
+        self.imm
+            .as_ref()
+            .map(|i| i.dominant_model())
+            .unwrap_or("CV")
     }
 }

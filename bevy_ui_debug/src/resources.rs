@@ -1,8 +1,8 @@
 //! Bevy resources shared across systems.
 
 use bevy::prelude::*;
-use sim::scenarios::Scenario;
 use sim::radar_sim::RadarSimulator;
+use sim::scenarios::Scenario;
 use tracker_core::pipeline::{Pipeline, PipelineConfig, PipelineOutput};
 use tracker_core::types::{RadarBatch, SensorId, TrackId};
 
