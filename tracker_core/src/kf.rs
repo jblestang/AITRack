@@ -68,7 +68,7 @@ pub struct CvKfConfig {
 impl Default for CvKfConfig {
     fn default() -> Self {
         Self {
-            process_noise_std: 1.0, // 1 m/s² std dev
+            process_noise_std: 5.0, // 5 m/s² std dev (allows tracking slow turns)
         }
     }
 }
