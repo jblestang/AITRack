@@ -74,7 +74,7 @@ fn run_scenario(
     replay_path: Option<&std::path::Path>,
 ) -> Result<()> {
     let mut scenario = Scenario::build(kind.clone(), seed);
-    let mut radar_sim = RadarSimulator::new(scenario.radars.clone(), seed + 1000);
+    let mut radar_sim = RadarSimulator::new(scenario.radars.clone(), seed);
     let mut pipeline = Pipeline::new(PipelineConfig::default());
 
     let dt = scenario.sim_dt;
@@ -83,7 +83,6 @@ fn run_scenario(
     let mut meas_id_counter = 0u64;
     let mut all_batches: Vec<RadarBatch> = Vec::new();
     let mut gt_frames: Vec<GroundTruthFrame> = Vec::new();
-    let mut metrics = TrackingMetrics::default();
 
     println!(
         "Running scenario '{}' (seed={}, duration={:.0}s)...",

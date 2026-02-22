@@ -4,7 +4,7 @@ use crate::resources::{PlayMode, RenderSettings, ResetEvent, SimState, TrackerAp
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use tracker_core::track::TrackStatus;
-use tracker_core::types::Measurement;
+
 
 /// Control panel: Play/Pause/Step buttons + speed + scenario info.
 pub fn ui_control_panel(

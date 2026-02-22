@@ -320,7 +320,7 @@ impl Scenario {
     // -----------------------------------------------------------------------
     /// 8 agile fighters executing a sequence of manoeuvres over 3 minutes:
     ///
-    /// ```
+    /// ```text
     /// t=0–15s   straight inbound at ~250 m/s (≈900 km/h)
     /// t=15–25s  hard 9-G turn (omega = ±0.25 rad/s, split-S or Immelmann)
     /// t=25–60s  second straight leg (post-turn escape run)

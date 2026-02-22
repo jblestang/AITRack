@@ -18,38 +18,7 @@ pub fn run_debug_app(kind: ScenarioKind, seed: u64) {
     let scenario = Scenario::build(kind.clone(), seed);
     let sim_state = SimState::new(scenario, seed);
 
-    // Choose pipeline config based on scenario
-    let pipeline_cfg = match kind {
-        ScenarioKind::Fighter => PipelineConfig {
-            use_imm: true,
-            // Deep wider gate (20.0 ≈ 99.99% for 2-DOF) to absorb high-G innovations
-            gate_threshold: 20.0,
-            // Slow CV has moderate noise; fast CV and CT have high noise
-            kf_config: CvKfConfig {
-                process_noise_std: 3.0,
-            },
-            imm_sigma_fast: 150.0,
-            imm_ct_sigma_p: 200.0,
-            imm_ct_sigma_v: 100.0,
-            // Let confirmed tracks survive up to 15 consecutive missed scans
-            track_manager_config: TrackManagerConfig {
-                miss_limit_confirmed: 15,
-                miss_limit_tentative: 2,
-                confirm_m: 3,
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        _ => PipelineConfig {
-            // Slightly looser gate for noisy scenarios
-            gate_threshold: 13.8,
-            track_manager_config: TrackManagerConfig {
-                miss_limit_confirmed: 7,
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-    };
+    let pipeline_cfg = PipelineConfig::default();
     let tracker_state = TrackerAppState::new(pipeline_cfg);
 
     App::new()

@@ -23,7 +23,7 @@ use crate::{
     track_manager::{TrackManager, TrackManagerConfig},
     types::{DMat, DVec, Measurement, MeasurementId, RadarBatch, TrackId},
 };
-use nalgebra::{DMatrix, DVector, Vector6};
+use nalgebra::{DMatrix, DVector};
 use rayon::prelude::*;
 use std::{collections::HashMap, time::Instant};
 
@@ -59,15 +59,22 @@ pub struct PipelineConfig {
 impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
-            gate_threshold: CHI2_99[2], // 99% for 2D
+            gate_threshold: 20.0, // wide gate for high-G maneuvers
             dummy_cost: 1000.0,
-            kf_config: CvKfConfig::default(),
-            track_manager_config: TrackManagerConfig::default(),
+            kf_config: CvKfConfig {
+                process_noise_std: 3.0,
+            },
+            track_manager_config: crate::track_manager::TrackManagerConfig {
+                miss_limit_confirmed: 15,
+                miss_limit_tentative: 2,
+                confirm_m: 3,
+                ..Default::default()
+            },
             collect_debug: true,
-            use_imm: false,
-            imm_sigma_fast: 30.0,
-            imm_ct_sigma_p: 50.0,
-            imm_ct_sigma_v: 30.0,
+            use_imm: true,
+            imm_sigma_fast: 150.0,
+            imm_ct_sigma_p: 200.0,
+            imm_ct_sigma_v: 100.0,
         }
     }
 }
