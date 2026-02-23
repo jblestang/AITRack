@@ -40,6 +40,11 @@ pub struct SimState {
     pub batch_history: Vec<RadarBatch>,
     /// All ground-truth frames for playback metric computation
     pub gt_history: Vec<sim::replay::GroundTruthFrame>,
+    /// Flags if currently extracting frames for a movie
+    pub is_recording: bool,
+    pub recording_frame: u64,
+    /// Whether the app should automatically encode and exit at the end of the scenario
+    pub auto_record: bool,
 }
 
 impl SimState {
@@ -55,6 +60,9 @@ impl SimState {
             meas_id_counter: 0,
             batch_history: Vec::new(),
             gt_history: Vec::new(),
+            is_recording: false,
+            recording_frame: 0,
+            auto_record: false,
         }
     }
 }

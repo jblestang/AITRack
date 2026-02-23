@@ -46,6 +46,51 @@ pub fn ui_control_panel(
 
             ui.separator();
 
+            let record_label = if sim_state.is_recording {
+                "⏹ Stop & Encode"
+            } else {
+                "🎥 Record Movie"
+            };
+            if ui.button(record_label).clicked() {
+                sim_state.is_recording = !sim_state.is_recording;
+                if sim_state.is_recording {
+                    sim_state.recording_frame = 0;
+                    sim_state.play_mode = PlayMode::Playing;
+                    sim_state.speed_multiplier = 1.0;
+                    let _ = std::fs::remove_dir_all("video_frames");
+                    std::fs::create_dir_all("video_frames").unwrap();
+                    tracing::info!("Started recording frames to video_frames/");
+                } else {
+                    sim_state.play_mode = PlayMode::Paused;
+                    tracing::info!("Encoding video_frames/ to output.mp4...");
+                    std::thread::spawn(|| {
+                        let status = std::process::Command::new("ffmpeg")
+                            .args(&[
+                                "-y",
+                                "-framerate",
+                                "20",
+                                "-i",
+                                "video_frames/frame_%05d.bmp",
+                                "-c:v",
+                                "libx264",
+                                "-pix_fmt",
+                                "yuv420p",
+                                "output.mp4",
+                            ])
+                            .status();
+                        match status {
+                            Ok(s) if s.success() => {
+                                tracing::info!("Successfully encoded output.mp4!");
+                                let _ = std::fs::remove_dir_all("video_frames");
+                            }
+                            _ => tracing::error!("Failed to encode video (is ffmpeg installed?)"),
+                        }
+                    });
+                }
+            }
+
+            ui.separator();
+
             // Speed multiplier
             ui.label("Speed:");
             let mut speed = sim_state.speed_multiplier;

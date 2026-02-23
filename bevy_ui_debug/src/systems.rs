@@ -1,7 +1,9 @@
 //! Simulation advance and tracker pipeline systems.
 
 use crate::resources::{PlayMode, ResetEvent, SimState, StepEvent, TrackerAppState};
+use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
+use bevy_egui::EguiContexts;
 use sim::replay::GroundTruthFrame;
 
 
@@ -33,12 +35,79 @@ pub fn keyboard_control_system(
     }
 }
 
+/// Provides mouse interactions to pan and zoom the 2D orthographic camera view.
+pub fn camera_control_system(
+    mut contexts: EguiContexts,
+    mut q_camera: Query<(&Camera, &mut OrthographicProjection, &mut Transform, &GlobalTransform)>,
+    mut scroll_evr: EventReader<MouseWheel>,
+    mut motion_evr: EventReader<MouseMotion>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+) {
+    if let Some(ctx) = contexts.try_ctx_mut() {
+        if ctx.wants_pointer_input() || ctx.wants_keyboard_input() {
+            scroll_evr.clear();
+            motion_evr.clear();
+            return;
+        }
+    }
+
+    let Ok((camera, mut proj, mut transform, global_transform)) = q_camera.get_single_mut() else {
+        return;
+    };
+    let Ok(window) = windows.get_single() else {
+        return;
+    };
+
+    // Zooming
+    let mut zoom_delta = 0.0;
+    for ev in scroll_evr.read() {
+        match ev.unit {
+            MouseScrollUnit::Line => zoom_delta += ev.y,
+            MouseScrollUnit::Pixel => zoom_delta += ev.y * 0.01,
+        }
+    }
+
+    if zoom_delta != 0.0 {
+        if let Some(cursor_pos) = window.cursor_position() {
+            if let Ok(vp_world_before) = camera.viewport_to_world_2d(global_transform, cursor_pos) {
+                let zoom_factor = 1.1_f32.powf(-zoom_delta);
+                proj.scale *= zoom_factor;
+                proj.scale = proj.scale.clamp(0.01, 1000.0);
+
+                let offset = vp_world_before - transform.translation.truncate();
+                transform.translation.x = vp_world_before.x - offset.x * zoom_factor;
+                transform.translation.y = vp_world_before.y - offset.y * zoom_factor;
+            }
+        } else {
+            let zoom_factor = 1.1_f32.powf(-zoom_delta);
+            proj.scale *= zoom_factor;
+            proj.scale = proj.scale.clamp(0.01, 1000.0);
+        }
+    }
+
+    // Panning
+    if buttons.pressed(MouseButton::Left) {
+        let mut pan_delta = Vec2::ZERO;
+        for ev in motion_evr.read() {
+            pan_delta += ev.delta;
+        }
+        if pan_delta != Vec2::ZERO {
+            transform.translation.x -= pan_delta.x * proj.scale;
+            transform.translation.y += pan_delta.y * proj.scale;
+        }
+    } else {
+        motion_evr.clear();
+    }
+}
+
 /// Advance simulation time and generate radar batches when playing.
 /// One Bevy frame can advance multiple sim ticks (speed_multiplier).
 pub fn advance_simulation_system(
     time: Res<Time>,
     mut sim_state: ResMut<SimState>,
     mut tracker_state: ResMut<TrackerAppState>,
+    mut exit: EventWriter<bevy::app::AppExit>,
 ) {
     let mode = sim_state.play_mode;
     if mode == PlayMode::Paused {
@@ -50,6 +119,8 @@ pub fn advance_simulation_system(
     let ticks = if mode == PlayMode::StepOnce {
         sim_state.play_mode = PlayMode::Paused;
         1
+    } else if sim_state.is_recording {
+        1 // Force perfect 1-to-1 frame capture
     } else {
         // Time-scaled: try to advance sim_time proportionally to wall time
         let elapsed = time.delta_secs_f64() * sim_state.speed_multiplier as f64;
@@ -59,6 +130,33 @@ pub fn advance_simulation_system(
     for _ in 0..ticks {
         if sim_state.sim_time >= sim_state.scenario.duration {
             sim_state.play_mode = PlayMode::Paused;
+            if sim_state.auto_record {
+                sim_state.is_recording = false;
+                tracing::info!("Auto-recording generated raw frames. Encoding output.mp4... (this might take a few seconds)");
+                
+                std::thread::spawn(|| {
+                    let status = std::process::Command::new("ffmpeg")
+                        .args(&[
+                            "-y",
+                            "-framerate", "20",
+                            "-i", "video_frames/frame_%05d.bmp",
+                            "-c:v", "libx264",
+                            "-pix_fmt", "yuv420p",
+                            "output.mp4"
+                        ])
+                        .status();
+                    
+                    match status {
+                        Ok(s) if s.success() => {
+                            tracing::info!("Successfully synthesized output.mp4");
+                            let _ = std::fs::remove_dir_all("video_frames");
+                        }
+                        _ => tracing::error!("Failed to encode video."),
+                    }
+                });
+                
+                exit.send(bevy::app::AppExit::Success);
+            }
             break;
         }
 
@@ -172,4 +270,19 @@ pub fn reset_system(
         tracker_state.all_track_metrics.clear();
         tracing::info!("Simulation reset");
     }
+}
+
+pub fn recording_system(
+    mut commands: Commands,
+    mut sim_state: ResMut<SimState>,
+) {
+    if !sim_state.is_recording || sim_state.play_mode == PlayMode::Paused {
+        return;
+    }
+    
+    let path = format!("video_frames/frame_{:05}.bmp", sim_state.recording_frame);
+    commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window())
+        .observe(bevy::render::view::screenshot::save_to_disk(path));
+    
+    sim_state.recording_frame += 1;
 }

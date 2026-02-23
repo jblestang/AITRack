@@ -34,6 +34,7 @@ bevy = { version = "0.15", default-features = false, features = [
     "wayland",
     "multi_threaded",
     "tonemapping_luts",
+    "bmp",
 ] }
 bevy_egui = "0.31"
 # Logging

@@ -19,6 +19,10 @@ struct Args {
     /// Random seed for reproducibility
     #[arg(long, default_value_t = 42)]
     seed: u64,
+
+    /// Automatically record a video from t=0 and exit when done
+    #[arg(long, default_value_t = false)]
+    record: bool,
 }
 
 fn main() {
@@ -27,5 +31,5 @@ fn main() {
         .init();
 
     let args = Args::parse();
-    bevy_ui_debug::run_debug_app(args.scenario, args.seed);
+    bevy_ui_debug::run_debug_app(args.scenario, args.seed, args.record);
 }
