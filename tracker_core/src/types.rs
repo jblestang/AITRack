@@ -122,5 +122,7 @@ pub struct RadarBatch {
     pub sensor_time: f64,
     /// Time the batch arrived at the tracker (may differ due to latency)
     pub arrival_time: f64,
+    /// Optional position of the sensor in world coordinates (helps bias estimation)
+    pub sensor_pos: Option<[f64; 3]>,
     pub measurements: Vec<Measurement>,
 }

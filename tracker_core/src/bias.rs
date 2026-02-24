@@ -58,12 +58,20 @@ impl SensorBiasState {
 
     /// Apply spatial bias correction to a cartesian 2D measurement.
     /// Returns (x_corrected, y_corrected).
-    pub fn correct_cartesian_2d(&self, x: f64, y: f64) -> (f64, f64) {
-        let cos_t = self.spatial.dtheta.cos();
-        let sin_t = self.spatial.dtheta.sin();
-        // Correct rotation then translation
-        let xr = cos_t * x - sin_t * y - self.spatial.dx;
-        let yr = sin_t * x + cos_t * y - self.spatial.dy;
+    /// `sensor_pos` is the world position of the radar (for local un-rotation).
+    pub fn correct_cartesian_2d(&self, x: f64, y: f64, sensor_pos: [f64; 3]) -> (f64, f64) {
+        // Correct translation then rotation to invert simulator's Rotate-then-Translate
+        // Simulator: mx = r_pos + R(dt) * (Z_raw - r_pos) + T_bias
+        // Inverse: Z_raw = R(-dt) * (mx - r_pos - T_bias) + r_pos
+        
+        let xt = x - sensor_pos[0] - self.spatial.dx;
+        let yt = y - sensor_pos[1] - self.spatial.dy;
+
+        let cos_t = (-self.spatial.dtheta).cos();
+        let sin_t = (-self.spatial.dtheta).sin();
+        
+        let xr = cos_t * xt - sin_t * yt + sensor_pos[0];
+        let yr = sin_t * xt + cos_t * yt + sensor_pos[1];
         (xr, yr)
     }
 
@@ -107,6 +115,7 @@ impl BiasEstimator {
         &mut self,
         sensor_id: SensorId,
         high_confidence_pairs: &[(crate::types::StateVec, DVector<f64>)],
+        sensor_pos: [f64; 3],
     ) {
         if high_confidence_pairs.is_empty() {
             return;
@@ -116,7 +125,9 @@ impl BiasEstimator {
         
         let mut sum_dx = 0.0;
         let mut sum_dy = 0.0;
+        let mut sum_dtheta = 0.0;
         let mut sum_dt0 = 0.0;
+        let mut dtheta_votes = 0.0;
         let mut temporal_votes = 0.0;
 
         for (track_state, innov) in high_confidence_pairs {
@@ -125,13 +136,23 @@ impl BiasEstimator {
             // Therefore, the raw innovation ν averages out to the bias B.
             
             // Phase D: Outlier rejection via magnitude absolute clamping
-            // A mis-associated clutter point passing the Mahalanobis gate might have a physically
-            // unreasonable innovation (e.g. 2000m). We clamp it to safely bound the integration.
-            let rx = innov[0].clamp(-800.0, 800.0);
-            let ry = innov[1].clamp(-800.0, 800.0);
+            let rx = innov[0].clamp(-1000.0, 1000.0);
+            let ry = innov[1].clamp(-1000.0, 1000.0);
             
             sum_dx += rx;
             sum_dy += ry;
+
+            // dtheta estimation:
+            // rotation dtheta causes tangential error relative to the radar: d_tangent = dtheta * R_local
+            // dtheta = (dx_local * innov_y - dy_local * innov_x) / (R_local^2)
+            let tx_local = track_state[0] - sensor_pos[0];
+            let ty_local = track_state[1] - sensor_pos[1];
+            let r2 = tx_local * tx_local + ty_local * ty_local;
+            if r2 > 100.0 {
+                let dtheta_est = (tx_local * ry - ty_local * rx) / r2;
+                sum_dtheta += dtheta_est.clamp(-0.1, 0.1);
+                dtheta_votes += 1.0;
+            }
 
             // Temporal estimation:
             // If the radar clock is delayed by dt0 (it reports events later than they happened),
@@ -158,15 +179,19 @@ impl BiasEstimator {
         let mean_dx = sum_dx / n;
         let mean_dy = sum_dy / n;
 
-        // Exponential Moving Average (EMA) update rules
-        // Since `innov` is the *residual* between the PRE-CORRECTED measurement and the prediction,
-        // it represents the *remaining* uncompensated bias. 
-        // We must cumulatively add this residual to the bias states, acting as an Integral controller.
-        let alpha_spatial = 0.1; // Learning rate for spatial bias (increased for faster convergence)
-        let alpha_temporal = 0.05; // Learning rate for clocks
+        // Dynamic Exponential Moving Average (EMA) update rules
+        // If confidence is low, use a large alpha to quickly acquisition the bias.
+        // If confidence is high, use a small alpha to filter out noise.
+        let alpha_spatial = if state.confidence < 0.8 { 0.15 } else { 0.02 };
+        let alpha_temporal = if state.confidence < 0.8 { 0.10 } else { 0.01 };
         
         state.spatial.dx += alpha_spatial * mean_dx;
         state.spatial.dy += alpha_spatial * mean_dy;
+
+        if dtheta_votes > 0.0 {
+            let mean_dtheta = sum_dtheta / dtheta_votes;
+            state.spatial.dtheta += alpha_spatial * mean_dtheta;
+        }
 
         if temporal_votes > 0.0 {
             let mean_dt0 = sum_dt0 / temporal_votes;

@@ -133,14 +133,18 @@ impl RadarSimulator {
 
                 // Convert to cartesian (with bias injection)
                 let (mx, my) = if radar.params.output_cartesian {
-                    let xraw = rpos[0] + noisy_range * noisy_az.cos();
-                    let yraw = rpos[1] + noisy_range * noisy_az.sin();
-                    // Apply injected bias (rotation then translation)
+                    let dx_local = noisy_range * noisy_az.cos();
+                    let dy_local = noisy_range * noisy_az.sin();
+
+                    // Apply injected bias: Rotation relative to radar, then Translation
                     let cos_t = radar.bias.dtheta.cos();
                     let sin_t = radar.bias.dtheta.sin();
+                    let d_rot_x = cos_t * dx_local - sin_t * dy_local;
+                    let d_rot_y = sin_t * dx_local + cos_t * dy_local;
+
                     (
-                        cos_t * xraw - sin_t * yraw + radar.bias.dx,
-                        sin_t * xraw + cos_t * yraw + radar.bias.dy,
+                        rpos[0] + d_rot_x + radar.bias.dx,
+                        rpos[1] + d_rot_y + radar.bias.dy,
                     )
                 } else {
                     (noisy_range, noisy_az)
@@ -149,9 +153,14 @@ impl RadarSimulator {
                 // Temporal bias: shift the reported timestamp
                 let reported_time = scan_time + radar.bias.dt0;
 
-                let sigma_xy =
-                    range * radar.params.azimuth_noise_std + radar.params.range_noise_std;
-                let sigma_sq = sigma_xy * sigma_xy;
+                let vr = radar.params.range_noise_std * radar.params.range_noise_std;
+                let vtheta = (range * radar.params.azimuth_noise_std).powi(2);
+                let c = azimuth.cos();
+                let s = azimuth.sin();
+                
+                let r_xx = vr * c * c + vtheta * s * s;
+                let r_yy = vr * s * s + vtheta * c * c;
+                let r_xy = (vr - vtheta) * c * s;
 
                 let id = MeasurementId(*meas_id_start);
                 *meas_id_start += 1;
@@ -170,7 +179,7 @@ impl RadarSimulator {
                     sensor_id: radar.id,
                     timestamp: reported_time,
                     value,
-                    noise_cov: vec![sigma_sq, 0.0, 0.0, sigma_sq],
+                    noise_cov: vec![r_xx, r_xy, r_xy, r_yy],
                 });
             }
 
@@ -201,7 +210,13 @@ impl RadarSimulator {
                 let rpos = radar.params.position;
                 let x = rpos[0] + clutter_range * clutter_az.cos() + radar.bias.dx;
                 let y = rpos[1] + clutter_range * clutter_az.sin() + radar.bias.dy;
-                let sigma_sq = (radar.params.range_noise_std * 2.0).powi(2);
+                let vr = radar.params.range_noise_std * radar.params.range_noise_std;
+                let vtheta = (clutter_range * radar.params.azimuth_noise_std).powi(2);
+                let c = clutter_az.cos();
+                let s = clutter_az.sin();
+                let r_xx = vr * c * c + vtheta * s * s;
+                let r_yy = vr * s * s + vtheta * c * c;
+                let r_xy = (vr - vtheta) * c * s;
                 let id = MeasurementId(*meas_id_start);
                 *meas_id_start += 1;
                 measurements.push(Measurement {
@@ -209,7 +224,7 @@ impl RadarSimulator {
                     sensor_id: radar.id,
                     timestamp: scan_time,
                     value: MeasurementValue::Cartesian2D { x, y },
-                    noise_cov: vec![sigma_sq, 0.0, 0.0, sigma_sq],
+                    noise_cov: vec![r_xx, r_xy, r_xy, r_yy],
                 });
             }
 
@@ -217,6 +232,7 @@ impl RadarSimulator {
                 sensor_id: radar.id,
                 sensor_time: scan_time,
                 arrival_time: sim_time,
+                sensor_pos: Some(radar.params.position),
                 measurements,
             });
         }

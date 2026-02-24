@@ -164,6 +164,8 @@ pub struct Pipeline {
     /// CT-Right KF used inside IMM
     kf_ctr: CtKalmanFilter,
     pub bias_estimator: BiasEstimator,
+    /// Registry of known sensor positions (updated from incoming batches)
+    pub sensor_positions: HashMap<crate::types::SensorId, [f64; 3]>,
     next_meas_id: u64,
 }
 
@@ -186,6 +188,7 @@ impl Pipeline {
             kf_ctl,
             kf_ctr,
             bias_estimator: BiasEstimator::new(),
+            sensor_positions: HashMap::new(),
             next_meas_id: 0,
         }
     }
@@ -199,6 +202,10 @@ impl Pipeline {
         // ----------------------------------------------------------------
         // Step 1: Bias correction (Phase A: identity, stats maintained)
         // ----------------------------------------------------------------
+        if let Some(pos) = batch.sensor_pos {
+            self.sensor_positions.insert(batch.sensor_id, pos);
+        }
+        let sensor_pos = self.sensor_positions.get(&batch.sensor_id).cloned().unwrap_or([0.0, 0.0, 0.0]);
         let sensor_bias = self.bias_estimator.get_or_create(batch.sensor_id).clone();
         let measurements: Vec<Measurement> = batch
             .measurements
@@ -207,7 +214,7 @@ impl Pipeline {
                 let mut mc = m.clone();
                 // Apply spatial bias correction if available
                 if let crate::types::MeasurementValue::Cartesian2D { x, y } = &mut mc.value {
-                    let (xc, yc) = sensor_bias.correct_cartesian_2d(*x, *y);
+                    let (xc, yc) = sensor_bias.correct_cartesian_2d(*x, *y, sensor_pos);
                     *x = xc;
                     *y = yc;
                 }
@@ -282,7 +289,12 @@ impl Pipeline {
         }
 
         // Parallel gating over all live tracks
-        let gate_threshold = self.config.gate_threshold;
+        let mut gate_threshold = self.config.gate_threshold;
+        // Phase C: If we have low confidence in the bias, widen the gate significantly
+        // to allow "blind" association of offset measurements.
+        if sensor_bias.confidence < 0.9 {
+            gate_threshold *= 15.0; // 15x area, ~3.9x radius
+        }
         let r_default = if measurements.is_empty() {
             DMatrix::from_diagonal(&DVector::from_vec(vec![100.0, 100.0]))
         } else {
@@ -507,7 +519,9 @@ impl Pipeline {
                      
                      if let Some(s_inv) = s.try_inverse() {
                          let d2 = innov.transpose() * s_inv * &innov;
-                         if d2[0] < 5.0 {
+                         // Widen harvest gate (e.g. 4x the normal gate) to allow large initial 
+                         // biases to contribute to the estimate.
+                         if d2[0] < self.config.gate_threshold * 4.0 {
                              high_conf_pairs.push((track.state.clone(), innov));
                          }
                      }
@@ -558,7 +572,7 @@ impl Pipeline {
         }
         
         // Feed harvested high-confidence pairs into BiasEstimator
-        self.bias_estimator.update(batch.sensor_id, &high_conf_pairs);
+        self.bias_estimator.update(batch.sensor_id, &high_conf_pairs, sensor_pos);
         
         debug.timing_update_us = t0.elapsed().as_micros() as u64;
 
