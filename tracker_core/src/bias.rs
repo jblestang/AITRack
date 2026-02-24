@@ -11,6 +11,7 @@
 //! - **Outlier rejection**: ignore associations with d² > outlier threshold.
 
 use crate::types::SensorId;
+use nalgebra::DVector;
 use serde::{Deserialize, Serialize};
 
 /// Spatial bias parameters for a single radar.
@@ -66,13 +67,18 @@ impl SensorBiasState {
         (xr, yr)
     }
 
-    /// Apply temporal bias correction to a measurement timestamp.
     pub fn correct_timestamp(&self, t: f64) -> f64 {
         t - self.dt0_at(t)
     }
 
     fn dt0_at(&self, t: f64) -> f64 {
         self.temporal.dt0 + self.temporal.dt_dot * t
+    }
+    
+    /// Returns a 2D bias vector [bx, by] evaluated at this timestamp.
+    /// Used directly in the EKF measurement innovation step.
+    pub fn get_spatial_bias_vector(&self) -> DVector<f64> {
+        DVector::from_vec(vec![self.spatial.dx, self.spatial.dy])
     }
 }
 
@@ -95,7 +101,79 @@ impl BiasEstimator {
             .or_insert_with(|| SensorBiasState::new(sensor_id))
     }
 
-    /// Phase A stub — will do online estimation in Phase C.
-    /// `innovations` holds (track_id_u64, innovation_vec) for high-confidence pairs.
-    pub fn update(&mut self, _innovations: &[(u64, Vec<f64>)]) {}
+    /// Execute online estimation logic (Phase C).
+    /// `innovations` holds `(track_state, innovation_vector)` for high-confidence associated pairs.
+    pub fn update(
+        &mut self,
+        sensor_id: SensorId,
+        high_confidence_pairs: &[(crate::types::StateVec, DVector<f64>)],
+    ) {
+        if high_confidence_pairs.is_empty() {
+            return;
+        }
+
+        let state = self.get_or_create(sensor_id);
+        
+        let mut sum_dx = 0.0;
+        let mut sum_dy = 0.0;
+        let mut sum_dt0 = 0.0;
+        let mut temporal_votes = 0.0;
+
+        for (track_state, innov) in high_confidence_pairs {
+            // innovation ν = z_raw - H * x_pred
+            // Under a translation bias (bx, by), E[z_raw] = H*x_true + B
+            // Therefore, the raw innovation ν averages out to the bias B.
+            
+            // Phase D: Outlier rejection via magnitude absolute clamping
+            // A mis-associated clutter point passing the Mahalanobis gate might have a physically
+            // unreasonable innovation (e.g. 2000m). We clamp it to safely bound the integration.
+            let rx = innov[0].clamp(-800.0, 800.0);
+            let ry = innov[1].clamp(-800.0, 800.0);
+            
+            sum_dx += rx;
+            sum_dy += ry;
+
+            // Temporal estimation:
+            // If the radar clock is delayed by dt0 (it reports events later than they happened),
+            // the target has already moved by v * dt0 physically.
+            // So the spatial error is proportional to velocity: e_pos = -v * dt0
+            // dt0 = -e_pos / v
+            
+            let vx = track_state[3];
+            let vy = track_state[4];
+            let speed_sq = vx * vx + vy * vy;
+            
+            // Only update clocks from fast-moving targets (avoid divide-by-zero noise)
+            if speed_sq > 25.0 {
+                // Project the spatial error onto the velocity vector to isolate timing delays
+                // from pure orthogonal spatial translation biases.
+                // Outlier rejection: cap max dt0 estimation per frame to 1.5 seconds.
+                let dt0_est = (-(rx * vx + ry * vy) / speed_sq).clamp(-1.5, 1.5);
+                sum_dt0 += dt0_est;
+                temporal_votes += 1.0;
+            }
+        }
+
+        let n = high_confidence_pairs.len() as f64;
+        let mean_dx = sum_dx / n;
+        let mean_dy = sum_dy / n;
+
+        // Exponential Moving Average (EMA) update rules
+        // Since `innov` is the *residual* between the PRE-CORRECTED measurement and the prediction,
+        // it represents the *remaining* uncompensated bias. 
+        // We must cumulatively add this residual to the bias states, acting as an Integral controller.
+        let alpha_spatial = 0.1; // Learning rate for spatial bias (increased for faster convergence)
+        let alpha_temporal = 0.05; // Learning rate for clocks
+        
+        state.spatial.dx += alpha_spatial * mean_dx;
+        state.spatial.dy += alpha_spatial * mean_dy;
+
+        if temporal_votes > 0.0 {
+            let mean_dt0 = sum_dt0 / temporal_votes;
+            state.temporal.dt0 += alpha_temporal * mean_dt0;
+        }
+        
+        // Asymptotically increase confidence towards 1.0 as more hits are processed
+        state.confidence = 1.0 - (1.0 - state.confidence) * 0.99;
+    }
 }
