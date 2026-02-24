@@ -532,8 +532,8 @@ impl Scenario {
                 200., // Range noise
                 0.04, // Angle noise
                 InjectedBias {
-                    dx: 1500.0,    // 1.5 km X offset
-                    dy: -800.0,    // -800m Y offset
+                    dx: 500.0,     // 500m X offset
+                    dy: -300.0,    // -300m Y offset
                     dtheta: 0.05,  // ~3 degrees rotation
                     dt0: 0.5,      // 500ms slow
                 },
@@ -547,8 +547,8 @@ impl Scenario {
                 250., // Range noise
                 0.05, // Angle noise
                 InjectedBias {
-                    dx: -1200.0,
-                    dy: 2000.0,
+                    dx: -400.0,
+                    dy: 600.0,
                     dtheta: -0.02,
                     dt0: -0.2,     // 200ms early
                 },
