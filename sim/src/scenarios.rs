@@ -558,7 +558,7 @@ impl Scenario {
         Scenario {
             name: "bias_calibration".into(),
             seed,
-            duration: 120.0,
+            duration: 240.0,
             sim_dt: 0.1,
             targets,
             radars,
