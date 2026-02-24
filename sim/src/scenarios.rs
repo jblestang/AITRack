@@ -254,66 +254,7 @@ impl Scenario {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Scenario 4: Bias Calibration
-    // -----------------------------------------------------------------------
-    fn bias_calibration(seed: u64) -> Self {
-        let targets = (0..20)
-            .map(|i| {
-                let angle = i as f64 * std::f64::consts::TAU / 20.0;
-                target(
-                    i as u64,
-                    [10000. * angle.cos(), 10000. * angle.sin(), 0.],
-                    [80. * (angle + 0.5).cos(), 80. * (angle + 0.5).sin(), 0.],
-                    MotionSpec::ConstantVelocity,
-                    None,
-                    None,
-                )
-            })
-            .collect();
 
-        let radars = vec![
-            sim_radar(
-                0,
-                [-5000., 0., 0.],
-                1.0,
-                0.9,
-                2.0,
-                200.,
-                0.04,
-                InjectedBias {
-                    dx: 200.0,
-                    dy: -150.0,
-                    dtheta: 0.02,
-                    dt0: 0.3,
-                },
-            ),
-            sim_radar(
-                1,
-                [5000., 0., 0.],
-                1.0,
-                0.9,
-                2.0,
-                200.,
-                0.04,
-                InjectedBias {
-                    dx: -100.0,
-                    dy: 80.0,
-                    dtheta: -0.015,
-                    dt0: -0.2,
-                },
-            ),
-        ];
-
-        Scenario {
-            name: "bias_calibration".into(),
-            seed,
-            duration: 180.0,
-            sim_dt: 0.1,
-            targets,
-            radars,
-        }
-    }
 
     // -----------------------------------------------------------------------
     // Scenario 5: Fighter — manoeuvring aircraft
@@ -469,7 +410,7 @@ impl Scenario {
                 [-5000., 0., 0.],
                 2.0,
                 0.92,
-                3.0,
+                0.0, // Deactivated clutter
                 150.,
                 0.03,
                 InjectedBias::default(),
@@ -479,7 +420,7 @@ impl Scenario {
                 [5000., 0., 0.],
                 2.0,
                 0.90,
-                3.0,
+                0.0, // Deactivated clutter
                 150.,
                 0.03,
                 InjectedBias::default(),
@@ -489,7 +430,7 @@ impl Scenario {
                 [0., 8000., 0.],
                 1.0,
                 0.88,
-                2.0,
+                0.0, // Deactivated clutter
                 200.,
                 0.04,
                 InjectedBias::default(),
@@ -570,11 +511,70 @@ impl Scenario {
             radars,
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Scenario 7: Bias Calibration Test (Phase C)
+    // -----------------------------------------------------------------------
+    fn bias_calibration(seed: u64) -> Self {
+        let targets = vec![
+            TARGET_TEMPLATE(0, [-8000., -5000., 2000.], [150., 50., 0.], MotionSpec::ConstantVelocity),
+            TARGET_TEMPLATE(1, [-6000., 4000., 3000.], [100., -80., 0.], MotionSpec::ConstantVelocity),
+            TARGET_TEMPLATE(2, [2000., -7000., 5000.], [-120., 90., 0.], MotionSpec::ConstantTurn { omega: 0.05 }),
+        ];
+
+        let radars = vec![
+            sim_radar(
+                0,
+                [-10000., -10000., 0.],
+                1.0,  // 1Hz refresh
+                1.0,  // Perfect detection
+                0.0,  // Zero clutter
+                200., // Range noise
+                0.04, // Angle noise
+                InjectedBias {
+                    dx: 1500.0,    // 1.5 km X offset
+                    dy: -800.0,    // -800m Y offset
+                    dtheta: 0.05,  // ~3 degrees rotation
+                    dt0: 0.5,      // 500ms slow
+                },
+            ),
+            sim_radar(
+                1,
+                [10000., 10000., 0.],
+                0.5,  // 0.5Hz refresh
+                1.0,  // Perfect detection
+                0.0,  // Zero clutter
+                250., // Range noise
+                0.05, // Angle noise
+                InjectedBias {
+                    dx: -1200.0,
+                    dy: 2000.0,
+                    dtheta: -0.02,
+                    dt0: -0.2,     // 200ms early
+                },
+            ),
+        ];
+
+        Scenario {
+            name: "bias_calibration".into(),
+            seed,
+            duration: 120.0,
+            sim_dt: 0.1,
+            targets,
+            radars,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Builder helpers
 // ---------------------------------------------------------------------------
+
+// A macro to easily spawn identical test-targets without copy pasting verbose `Option` logic.
+#[allow(non_snake_case)]
+fn TARGET_TEMPLATE(id: u64, pos: [f64; 3], vel: [f64; 3], motion: MotionSpec) -> Target {
+    target(id, pos, vel, motion, None, None)
+}
 
 fn target(
     id: u64,

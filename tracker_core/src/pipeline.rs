@@ -54,6 +54,14 @@ pub struct PipelineConfig {
     pub imm_ct_sigma_p: f64,
     /// Velocity process noise std for the CT model inside IMM (m/s)
     pub imm_ct_sigma_v: f64,
+    /// Enable Joint Probabilistic Data Association (JPDA) instead of Hungarian.
+    pub use_jpda: bool,
+    /// Enable merging of duplicate tracks observed by multiple asynchronous radars.
+    pub enable_track_merging: bool,
+    /// Absolute maximum spatial distance squared (fast pruning)
+    pub merge_dist_sq: f64,
+    /// The Mahalanobis 2D statistical distance squared limit to allow track merging.
+    pub merge_maha_sq: f64,
 }
 
 impl Default for PipelineConfig {
@@ -75,6 +83,10 @@ impl Default for PipelineConfig {
             imm_sigma_fast: 150.0,
             imm_ct_sigma_p: 200.0,
             imm_ct_sigma_v: 100.0,
+            use_jpda: true,
+            enable_track_merging: false, // Disabled to prevent it murdering the 50 dense-crossing targets
+            merge_dist_sq: 6000.0 * 6000.0, // 6km fast spatial bound
+            merge_maha_sq: 20.0, // 99.9% statistical overlap
         }
     }
 }
@@ -102,6 +114,8 @@ pub struct PipelineDebugData {
     pub timing_assign_us: u64,
     pub timing_update_us: u64,
     pub timing_manage_us: u64,
+    /// Bias estimation states for all sensors
+    pub sensor_biases: std::collections::HashMap<crate::types::SensorId, crate::bias::SensorBiasState>,
 }
 
 /// Outputs of one pipeline step.
@@ -289,6 +303,15 @@ impl Pipeline {
                 for &mi in &nearby_meas_indices {
                     let meas = &measurements[mi];
                     let z = meas.to_cartesian_2d();
+                    
+                    // Absolute physical hard-cap to prevent Mahalanobis explosion seduction
+                    let dx = z[0] - track.state[0];
+                    let dy = z[1] - track.state[1];
+                    let physical_dist_sq = dx * dx + dy * dy;
+                    if physical_dist_sq > 2000.0 * 2000.0 {
+                        continue;
+                    }
+
                     let r = meas.noise_cov_matrix();
                     let gate =
                         mahalanobis_gate(&track.state, &track.cov, &z, &h, &r, gate_threshold);
@@ -363,17 +386,36 @@ impl Pipeline {
                 .collect();
         }
 
-        // Parallel Hungarian assignment over disconnected components
+        // Parallel resolution over disconnected components
         let dummy_cost = self.config.dummy_cost;
-        let assignment_results: Vec<_> = components
-            .par_iter()
-            .map(|comp| hungarian_solve(comp, dummy_cost))
-            .collect();
+        let mut jpda_outputs: Vec<(usize, Vec<(usize, f64)>, f64)> = Vec::new();
 
-        for ass in assignment_results {
-            all_assignments.extend(ass.pairs);
-            all_unmatched_tracks.extend(ass.unmatched_tracks);
-            all_unmatched_meas.extend(ass.unmatched_meas);
+        if self.config.use_jpda {
+            let pd = 0.95; 
+            let lambda_c = 1e-6;
+            let jpda_results: Vec<_> = components
+                .par_iter()
+                .map(|comp| crate::jpda::jpda_solve(comp, &graph, pd, lambda_c, dummy_cost))
+                .collect();
+            
+            for (comp, res) in components.iter().zip(jpda_results.iter()) {
+                all_unmatched_tracks.extend(&res.unmatched_tracks);
+                all_unmatched_meas.extend(&res.unmatched_meas);
+                for (i, &ti) in comp.track_indices.iter().enumerate() {
+                    jpda_outputs.push((ti, res.meas_probs[i].clone(), res.miss_probs[i]));
+                }
+            }
+        } else {
+            let assignment_results: Vec<_> = components
+                .par_iter()
+                .map(|comp| hungarian_solve(comp, dummy_cost))
+                .collect();
+
+            for ass in assignment_results {
+                all_assignments.extend(ass.pairs);
+                all_unmatched_tracks.extend(ass.unmatched_tracks);
+                all_unmatched_meas.extend(ass.unmatched_meas);
+            }
         }
 
         // Tracks not in any component are all unmatched (no measurements near them)
@@ -386,64 +428,138 @@ impl Pipeline {
         debug.timing_assign_us = t0.elapsed().as_micros() as u64;
 
         // ----------------------------------------------------------------
-        // Step 7: KF update for matched pairs
+        // Step 7: KF update for matched pairs & Bias Harvesting
         // ----------------------------------------------------------------
         let t0 = Instant::now();
         let mut matched_meas_indices: std::collections::HashSet<usize> =
             std::collections::HashSet::new();
         let h_ref = &h;
         let mut confirmations = 0;
+        
+        // Collect pairs for bias estimation (Phase C)
+        let mut high_conf_pairs = Vec::new();
 
-        for (ti, mi) in &all_assignments {
-            let meas = &measurements[*mi];
-            let z = meas.to_cartesian_2d();
-            let r = meas.noise_cov_matrix();
-
-            let track = &mut self.tracks[*ti];
-
-            if let Some(imm) = &mut track.imm {
-                // IMM update: per-model update + likelihood weighting + fuse
-                imm.update(
-                    &z,
-                    h_ref,
-                    &r,
-                    &self.kf,
-                    &self.kf_fast,
-                    &self.kf_ctl,
-                    &self.kf_ctr,
-                );
-                track.state = imm.fused_state;
-                track.cov = imm.fused_cov;
-
-                if collect {
-                    let innov = z.clone()
-                        - h_ref * nalgebra::DVector::from_iterator(6, track.state.iter().copied());
-                    debug
-                        .innovations
-                        .push((track.id, innov.iter().copied().collect()));
-                    debug.assignments.push((track.id, meas.id));
+        if self.config.use_jpda {
+            for (ti, m_probs, miss_prob) in jpda_outputs {
+                let track = &mut self.tracks[ti];
+                
+                let mut jpda_meas = Vec::new();
+                for (mi, prob) in &m_probs {
+                    let meas = &measurements[*mi];
+                    let z = meas.to_cartesian_2d();
+                    jpda_meas.push((z, *prob));
+                    if collect {
+                        debug.assignments.push((track.id, meas.id));
+                    }
+                    matched_meas_indices.insert(*mi);
                 }
-            } else {
-                let res = self.kf.update(&track.state, &track.cov, &z, h_ref, &r);
-                track.state = res.state;
-                track.cov = res.cov;
-                if collect {
-                    debug.assignments.push((track.id, meas.id));
-                    debug
-                        .innovations
-                        .push((track.id, res.innovation.iter().copied().collect()));
+                
+                if jpda_meas.is_empty() {
+                    continue; // Register miss happens later
+                }
+                
+                // Track JPDA innovation for bias estimation if dominating
+                // We harvest the highest probability association if it's confidently unique
+                if !jpda_meas.is_empty() {
+                    let (best_z, best_prob) = jpda_meas.iter()
+                        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap();
+                    if *best_prob > 0.8 && track.status != TrackStatus::Deleted {
+                        let innov = best_z - h_ref * nalgebra::DVector::from_iterator(6, track.state.iter().copied());
+                        high_conf_pairs.push((track.state.clone(), innov));
+                    }
+                }
+
+                let r = measurements[m_probs[0].0].noise_cov_matrix();
+
+                if let Some(imm) = &mut track.imm {
+                    imm.update_jpda(&jpda_meas, miss_prob, h_ref, &r, &self.kf, &self.kf_fast, &self.kf_ctl, &self.kf_ctr);
+                    track.state = imm.fused_state;
+                    track.cov = imm.fused_cov;
+                } else {
+                    let res = self.kf.update_jpda(&track.state, &track.cov, &jpda_meas, miss_prob, h_ref, &r);
+                    track.state = res.0;
+                    track.cov = res.1;
+                }
+
+                let prev_status = track.status;
+                track.last_updated = batch_time;
+                track.push_history();
+                self.track_manager.register_hit(track);
+                if track.status == TrackStatus::Confirmed && prev_status == TrackStatus::Tentative {
+                    confirmations += 1;
                 }
             }
+        } else {
+            for (ti, mi) in &all_assignments {
+                matched_meas_indices.insert(*mi);
+                let meas = &measurements[*mi];
+                let z = meas.to_cartesian_2d();
+                let r = meas.noise_cov_matrix();
 
-            let prev_status = track.status;
-            track.last_updated = batch_time;
-            track.push_history();
-            self.track_manager.register_hit(track);
-            if track.status == TrackStatus::Confirmed && prev_status == TrackStatus::Tentative {
-                confirmations += 1;
+                let track = &mut self.tracks[*ti];
+                
+                // Track standard GNN innovation for bias estimation
+                if track.status != TrackStatus::Deleted {
+                     // Check Mahalanobis distance to ensure it's a high-confidence match before updating bias
+                     let s = h_ref * track.cov * h_ref.transpose() + &r;
+                     let innov = &z - h_ref * nalgebra::DVector::from_iterator(6, track.state.iter().copied());
+                     
+                     if let Some(s_inv) = s.try_inverse() {
+                         let d2 = innov.transpose() * s_inv * &innov;
+                         if d2[0] < 5.0 {
+                             high_conf_pairs.push((track.state.clone(), innov));
+                         }
+                     }
+                }
+
+                if let Some(imm) = &mut track.imm {
+                    // IMM update: per-model update + likelihood weighting + fuse
+                    imm.update(
+                        &z,
+                        h_ref,
+                        &r,
+                        &self.kf,
+                        &self.kf_fast,
+                        &self.kf_ctl,
+                        &self.kf_ctr,
+                    );
+                    track.state = imm.fused_state;
+                    track.cov = imm.fused_cov;
+
+                    if collect {
+                        let innov = z.clone()
+                            - h_ref * nalgebra::DVector::from_iterator(6, track.state.iter().copied());
+                        debug
+                            .innovations
+                            .push((track.id, innov.iter().copied().collect()));
+                        debug.assignments.push((track.id, meas.id));
+                    }
+                } else {
+                    let res = self.kf.update(&track.state, &track.cov, &z, h_ref, &r);
+                    track.state = res.state;
+                    track.cov = res.cov;
+                    if collect {
+                        debug.assignments.push((track.id, meas.id));
+                        debug
+                            .innovations
+                            .push((track.id, res.innovation.iter().copied().collect()));
+                    }
+                }
+
+                let prev_status = track.status;
+                track.last_updated = batch_time;
+                track.push_history();
+                self.track_manager.register_hit(track);
+                if track.status == TrackStatus::Confirmed && prev_status == TrackStatus::Tentative {
+                    confirmations += 1;
+                }
             }
-            matched_meas_indices.insert(*mi);
         }
+        
+        // Feed harvested high-confidence pairs into BiasEstimator
+        self.bias_estimator.update(batch.sensor_id, &high_conf_pairs);
+        
         debug.timing_update_us = t0.elapsed().as_micros() as u64;
 
         // ----------------------------------------------------------------
@@ -472,18 +588,111 @@ impl Pipeline {
         }
 
         // ----------------------------------------------------------------
-        // Step 10: Prune deleted tracks
+        // Step 10: Track Merging
+        // Prevent duplicate tracks from asynchronous multi-sensor fusion.
+        // ----------------------------------------------------------------
+        if self.config.enable_track_merging {
+            let t_merge = Instant::now();
+            let mut merged_away = std::collections::HashSet::new();
+            
+            // O(T^2) spatial clustering loop 
+            let live_indices: Vec<usize> = (0..self.tracks.len())
+                .filter(|&i| self.tracks[i].status != TrackStatus::Deleted)
+                .collect();
+
+            // Compare each pair
+            for (i, &idx1) in live_indices.iter().enumerate() {
+                if merged_away.contains(&idx1) { continue; }
+                
+                for &idx2 in &live_indices[i + 1..] {
+                    if merged_away.contains(&idx2) { continue; }
+
+                    let t1 = &self.tracks[idx1];
+                    let t2 = &self.tracks[idx2];
+                    
+                    // Fast Euclidean distance bounding check
+                    let dx = t1.state[0] - t2.state[0];
+                    let dy = t1.state[1] - t2.state[1];
+                    let dist_sq = dx * dx + dy * dy;
+
+                    // Velocity check: crossing independent targets have distinct velocities.
+                    // Tentative tracks have uninitialized/poor velocity estimates, so conditionally skip the `dv` check if either is Tentative.
+                    let both_confirmed = t1.status == TrackStatus::Confirmed && t2.status == TrackStatus::Confirmed;
+                    let mut vel_ok = true;
+                    
+                    if both_confirmed {
+                        let dvx = t1.state[3] - t2.state[3];
+                        let dvy = t1.state[4] - t2.state[4];
+                        let dv_sq = dvx * dvx + dvy * dvy;
+                        vel_ok = dv_sq < 50.0 * 50.0;
+                    }
+
+                    // Strict Covariance-based spatial Mahalanobis distance (S = P1(x,y) + P2(x,y))
+                    let s_x = t1.cov[(0, 0)] + t2.cov[(0, 0)];
+                    let s_y = t1.cov[(1, 1)] + t2.cov[(1, 1)];
+                    let s_xy = t1.cov[(0, 1)] + t2.cov[(0, 1)];
+                    let det = s_x * s_y - s_xy * s_xy;
+                    
+                    let mut maha_d2 = std::f64::INFINITY;
+                    if det > 1e-6 {
+                        maha_d2 = (dx * (s_y * dx - s_xy * dy) + dy * (-s_xy * dx + s_x * dy)) / det;
+                    }
+
+                    // Merge if statistically overlapping AND velocity vector is very similar (or track is Tentative).
+                    if dist_sq < self.config.merge_dist_sq && maha_d2 < self.config.merge_maha_sq && vel_ok {
+                        // Tracks are redundantly covering the same target.
+                        let t1_score = (
+                            match t1.status {
+                                TrackStatus::Confirmed => 2,
+                                TrackStatus::Tentative => 1,
+                                TrackStatus::Deleted => 0,
+                            },
+                            t1.total_hits,
+                            std::cmp::Reverse(t1.id.0), // Tie breaker: smallest ID wins (oldest original track)
+                        );
+                        let t2_score = (
+                            match t2.status {
+                                TrackStatus::Confirmed => 2,
+                                TrackStatus::Tentative => 1,
+                                TrackStatus::Deleted => 0,
+                            },
+                            t2.total_hits,
+                            std::cmp::Reverse(t2.id.0),
+                        );
+
+                        if t1_score >= t2_score {
+                            merged_away.insert(idx2);
+                        } else {
+                            merged_away.insert(idx1);
+                            break; // idx1 is gone, no need to compare it further
+                        }
+                    }
+                }
+            }
+
+            // Execute deletions
+            for &idx in &merged_away {
+                self.tracks[idx].status = TrackStatus::Deleted;
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // Step 11: Prune deleted tracks
         // ----------------------------------------------------------------
         let deletions = TrackManager::prune_deleted(&mut self.tracks);
         debug.timing_manage_us = t0.elapsed().as_micros() as u64;
 
-        let total_time_us = start_total.elapsed().as_micros() as u64;
+        if self.config.collect_debug {
+            debug.sensor_biases = self.bias_estimator.sensor_states.clone();
+        }
+
+        debug.timing_manage_us = t0.elapsed().as_micros() as u64;
 
         PipelineOutput {
             tracks: self.tracks.clone(),
-            unmatched_measurements: unmatched_meas,
+            unmatched_measurements: unmatched_meas.clone(),
             debug,
-            total_time_us,
+            total_time_us: start_total.elapsed().as_micros() as u64,
             births,
             confirmations,
             deletions,

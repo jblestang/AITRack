@@ -277,9 +277,21 @@ pub fn ui_track_inspector(
                                 radar.params.range_noise_std, radar.params.azimuth_noise_std
                             ));
                             ui.label(format!(
-                                "Injected bias: dx={:.0}m dy={:.0}m dθ={:.3}rad dt0={:.3}s",
+                                "Injected bias (True): dx={:.0}m dy={:.0}m dθ={:.3}rad dt0={:.3}s",
                                 radar.bias.dx, radar.bias.dy, radar.bias.dtheta, radar.bias.dt0
                             ));
+                            
+                            // Visualize the Tracker's Online Estimations (Phase C)
+                            if let Some(est) = output.debug.sensor_biases.get(&radar.id) {
+                                ui.label(egui::RichText::new(format!(
+                                    "Estimated bias (EMA): dx={:.0}m dy={:.0}m dθ={:.3}rad dt0={:.3}s",
+                                    est.spatial.dx, est.spatial.dy, est.spatial.dtheta, est.temporal.dt0
+                                )).color(egui::Color32::from_rgb(100, 200, 255)));
+                                
+                                ui.add(egui::ProgressBar::new(est.confidence as f32).text(format!("Confidence: {:.1}%", est.confidence * 100.0)));
+                            } else {
+                                ui.label(egui::RichText::new("Estimated bias: (no data yet)").color(egui::Color32::DARK_GRAY));
+                            }
                         });
                     }
                 },
