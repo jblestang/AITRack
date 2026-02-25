@@ -432,4 +432,56 @@ mod tests {
         assert!(ass.pairs.contains(&(0, 0)));
         assert!(ass.pairs.contains(&(1, 1)));
     }
+
+    #[test]
+    fn hungarian_competition() {
+        // Two tracks, one measurement. Track 0 is closer.
+        let comp = Component {
+            track_indices: vec![0, 1],
+            meas_indices: vec![0],
+            edges: vec![
+                AssignEdge { track_idx: 0, meas_idx: 0, cost: 5.0 },
+                AssignEdge { track_idx: 1, meas_idx: 0, cost: 10.0 },
+            ],
+        };
+        let ass = hungarian_solve(&comp, 100.0);
+        assert_eq!(ass.pairs.len(), 1);
+        assert_eq!(ass.pairs[0], (0, 0));
+        assert_eq!(ass.unmatched_tracks, vec![1]);
+    }
+
+    #[test]
+    fn hungarian_dummy_trigger() {
+        // Cost is higher than dummy_cost.
+        let comp = Component {
+            track_indices: vec![0],
+            meas_indices: vec![0],
+            edges: vec![
+                AssignEdge { track_idx: 0, meas_idx: 0, cost: 200.0 },
+            ],
+        };
+        let ass = hungarian_solve(&comp, 100.0);
+        assert_eq!(ass.pairs.len(), 0);
+        assert_eq!(ass.unmatched_tracks, vec![0]);
+        assert_eq!(ass.unmatched_meas, vec![0]);
+    }
+
+    #[test]
+    fn partition_complex() {
+        let mut graph = BipartiteGraph::new(10, 10);
+        // Chain: T0-M0, M0-T1, T1-M1
+        graph.add_edge(0, 0, 1.0);
+        graph.add_edge(1, 0, 1.0);
+        graph.add_edge(1, 1, 1.0);
+        
+        // Separate: T2-M2
+        graph.add_edge(2, 2, 1.0);
+
+        let comps = partition_components(&graph);
+        assert_eq!(comps.len(), 2);
+        
+        let c1 = comps.iter().find(|c| c.track_indices.contains(&0)).unwrap();
+        assert_eq!(c1.track_indices.len(), 2); // 0, 1
+        assert_eq!(c1.meas_indices.len(), 2);  // 0, 1
+    }
 }

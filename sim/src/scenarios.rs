@@ -520,37 +520,60 @@ impl Scenario {
             TARGET_TEMPLATE(0, [-8000., -5000., 2000.], [150., 50., 0.], MotionSpec::ConstantVelocity),
             TARGET_TEMPLATE(1, [-6000., 4000., 3000.], [100., -80., 0.], MotionSpec::ConstantVelocity),
             TARGET_TEMPLATE(2, [2000., -7000., 5000.], [-120., 90., 0.], MotionSpec::ConstantTurn { omega: 0.05 }),
+            // Additional planes to saturate ILS faster
+            TARGET_TEMPLATE(3, [5000., 5000., 4000.], [-100., -100., 0.], MotionSpec::ConstantVelocity),
+            TARGET_TEMPLATE(4, [10000., -2000., 1000.], [-200., 50., 0.], MotionSpec::ConstantVelocity),
+            TARGET_TEMPLATE(5, [-3000., 8000., 6000.], [50., -150., 0.], MotionSpec::ConstantVelocity),
+            TARGET_TEMPLATE(6, [-12000., -10000., 2000.], [120., 120., 0.], MotionSpec::ConstantVelocity),
+            TARGET_TEMPLATE(7, [15000., 15000., 3000.], [-80., -180., 0.], MotionSpec::ConstantAccel { ax: -2.0, ay: 1.0, az: 0.0 }),
+            TARGET_TEMPLATE(8, [-5000., -15000., 4500.], [200., 20., 0.], MotionSpec::ConstantVelocity),
+            TARGET_TEMPLATE(9, [12000., 0., 5000.], [-50., 200., 0.], MotionSpec::ConstantVelocity),
+            TARGET_TEMPLATE(10, [0., 12000., 3000.], [180., -30., 0.], MotionSpec::ConstantVelocity),
+            TARGET_TEMPLATE(11, [-15000., 5000., 2500.], [100., 100., 0.], MotionSpec::ConstantTurn { omega: -0.04 }),
+            TARGET_TEMPLATE(12, [8000., -8000., 1500.], [-150., -150., 0.], MotionSpec::ConstantVelocity),
         ];
 
         let radars = vec![
-            sim_radar(
+            SimRadar::new(
                 0,
-                [-10000., -10000., 0.],
-                1.0,  // 1Hz refresh
-                1.0,  // Perfect detection
-                0.0,  // Zero clutter
-                200., // Range noise
-                0.04, // Angle noise
+                RadarParams {
+                    position: [5000., 0., 0.],
+                    refresh_rate: 1.0,
+                    p_detection: 0.98,
+                    max_range: 30000.,
+                    range_noise_std: 30.0,
+                    azimuth_noise_std: 0.005,
+                    output_cartesian: true,
+                    ..Default::default()
+                },
                 InjectedBias {
-                    dx: 500.0,     // 500m X offset
-                    dy: -300.0,    // -300m Y offset
-                    dtheta: 0.05,  // ~3 degrees rotation
-                    dt0: 0.5,      // 500ms slow
+                    dx: 0.0,
+                    dy: 0.0,
+                    dtheta: 0.0,
+                    dt0: 0.0,
+                    range_bias: 0.0,
+                    azimuth_bias: 0.0,
                 },
             ),
-            sim_radar(
+            SimRadar::new(
                 1,
-                [10000., 10000., 0.],
-                0.5,  // 0.5Hz refresh
-                1.0,  // Perfect detection
-                0.0,  // Zero clutter
-                250., // Range noise
-                0.05, // Angle noise
+                RadarParams {
+                    position: [-5000., 5000., 0.],
+                    refresh_rate: 1.5,
+                    p_detection: 0.95,
+                    max_range: 30000.,
+                    range_noise_std: 30.0,
+                    azimuth_noise_std: 0.005,
+                    output_cartesian: true,
+                    ..Default::default()
+                },
                 InjectedBias {
-                    dx: -400.0,
-                    dy: 600.0,
-                    dtheta: -0.02,
-                    dt0: -0.2,     // 200ms early
+                    dx: -200.0,
+                    dy: 400.0,
+                    dtheta: -0.05,
+                    dt0: -0.2, // Clock is 200ms early
+                    range_bias: 20.0,
+                    azimuth_bias: -0.01,
                 },
             ),
         ];
@@ -558,7 +581,7 @@ impl Scenario {
         Scenario {
             name: "bias_calibration".into(),
             seed,
-            duration: 240.0,
+            duration: 3600.0,
             sim_dt: 0.1,
             targets,
             radars,

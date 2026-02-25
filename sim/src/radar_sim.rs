@@ -16,14 +16,12 @@ use tracker_core::types::{Measurement, MeasurementId, MeasurementValue, RadarBat
 /// Known bias parameters injected by the simulator (ground truth for Phase C).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct InjectedBias {
-    /// Spatial: offset x (meters)
     pub dx: f64,
-    /// Spatial: offset y (meters)
     pub dy: f64,
-    /// Spatial: rotation (radians)
     pub dtheta: f64,
-    /// Temporal: clock offset (seconds) — measurements appear earlier/later
     pub dt0: f64,
+    pub range_bias: f64,
+    pub azimuth_bias: f64,
 }
 
 /// One configured radar in the simulation.
@@ -123,13 +121,15 @@ impl RadarSimulator {
                     continue;
                 }
 
-                // Add noise
+                // Add noise + bias
                 let noisy_range = range
                     + self.rng.gen::<f64>() * radar.params.range_noise_std * 2.0
-                    - radar.params.range_noise_std;
+                    - radar.params.range_noise_std
+                    + radar.bias.range_bias;
                 let noisy_az = azimuth
                     + self.rng.gen::<f64>() * radar.params.azimuth_noise_std * 2.0
-                    - radar.params.azimuth_noise_std;
+                    - radar.params.azimuth_noise_std
+                    + radar.bias.azimuth_bias;
 
                 // Convert to cartesian (with bias injection)
                 let (mx, my) = if radar.params.output_cartesian {
@@ -230,10 +230,10 @@ impl RadarSimulator {
 
             batches.push(RadarBatch {
                 sensor_id: radar.id,
-                sensor_time: scan_time,
+                sensor_time: scan_time + radar.bias.dt0,
                 arrival_time: sim_time,
                 sensor_pos: Some(radar.params.position),
-                measurements,
+                measurements: measurements,
             });
         }
 

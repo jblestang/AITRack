@@ -71,7 +71,14 @@ impl TrackManager {
         );
         let ps = self.config.init_pos_std * self.config.init_pos_std;
         let vs = self.config.init_vel_std * self.config.init_vel_std;
-        let cov = StateCov::from_diagonal(&Vector6::new(ps, ps, ps, vs, vs, vs));
+        
+        let mut cov = StateCov::from_diagonal(&Vector6::new(ps, ps, ps, vs, vs, vs));
+        if meas.noise_cov.len() == 4 {
+            cov[(0, 0)] = meas.noise_cov[0];
+            cov[(0, 1)] = meas.noise_cov[1];
+            cov[(1, 0)] = meas.noise_cov[2];
+            cov[(1, 1)] = meas.noise_cov[3];
+        }
         Track::new(id, state, cov, current_time)
     }
 
@@ -163,11 +170,40 @@ mod tests {
             TrackStatus::Confirmed,
             "Still alive at 3 misses (limit=3, delete when > 3)"
         );
-        mgr.register_miss(&mut track); // misses=4 > 3 => deleted
         assert_eq!(
             track.status,
             TrackStatus::Deleted,
             "Deleted after miss > limit"
         );
+    }
+
+    #[test]
+    fn tentative_deleted_after_one_miss() {
+        let cfg = TrackManagerConfig {
+            miss_limit_tentative: 1, // Delete after 1 miss (misses > 1 is false, so wait...)
+            ..Default::default()
+        };
+        // wait, the logic is "if misses > limit { Deleted }". 
+        // So with limit 1, misses=1 is OK, misses=2 is Deleted.
+        let mgr = TrackManager::new(cfg);
+        let mut track = Track::new(TrackId(0), Vector6::zeros(), StateCov::identity(), 0.0);
+        
+        mgr.register_miss(&mut track); // misses=1
+        assert_eq!(track.status, TrackStatus::Tentative);
+        mgr.register_miss(&mut track); // misses=2 > limit 1
+        assert_eq!(track.status, TrackStatus::Deleted);
+    }
+
+    #[test]
+    fn prune_deleted_removes_correctly() {
+        let mut tracks = vec![
+            Track { status: TrackStatus::Confirmed, ..Track::new(TrackId(0), Vector6::zeros(), StateCov::identity(), 0.0) },
+            Track { status: TrackStatus::Deleted, ..Track::new(TrackId(1), Vector6::zeros(), StateCov::identity(), 0.0) },
+            Track { status: TrackStatus::Tentative, ..Track::new(TrackId(2), Vector6::zeros(), StateCov::identity(), 0.0) },
+        ];
+        let count = TrackManager::prune_deleted(&mut tracks);
+        assert_eq!(count, 1);
+        assert_eq!(tracks.len(), 2);
+        assert!(tracks.iter().all(|t| t.status != TrackStatus::Deleted));
     }
 }

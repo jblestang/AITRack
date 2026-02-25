@@ -38,6 +38,20 @@ pub trait KalmanFilter {
         h: &DMat,
         r: &DMat,
     ) -> KfUpdateResult;
+
+    /// Update state and covariance utilizing Joint Probabilistic Data Association (JPDA).
+    /// `meas_probs` is a list of (measurement z, association probability β).
+    /// `miss_prob` is the probability β_0 that none of the measurements are correct (missed detection).
+    /// Returns the updated state and covariance.
+    fn update_jpda(
+        &self,
+        state: &StateVec,
+        cov: &StateCov,
+        meas_probs: &[(DVec, f64)],
+        miss_prob: f64,
+        h: &DMat,
+        r: &DMat,
+    ) -> (StateVec, StateCov, f64);
 }
 
 /// Result of a KF update step, exposed for debug UI.
@@ -168,6 +182,74 @@ impl KalmanFilter for CvKalmanFilter {
             innovation_cov: s,
             kalman_gain: k,
         }
+    }
+
+    fn update_jpda(
+        &self,
+        state: &StateVec,
+        cov: &StateCov,
+        meas_probs: &[(DVec, f64)],
+        miss_prob: f64,
+        h: &DMat,
+        r: &DMat,
+    ) -> (StateVec, StateCov, f64) {
+        let x_dyn = DVec::from_iterator(6, state.iter().copied());
+        let p_dyn = DMat::from_row_slice(6, 6, cov.as_slice());
+
+        let hx = h * &x_dyn;
+        let hp = h * &p_dyn;
+        let s = &hp * h.transpose() + r;
+
+        let s_lu = s.clone().lu();
+        // If S is singular, avoid crashing.
+        let s_inv = match s_lu.try_inverse() {
+            Some(inv) => inv,
+            None => return (*state, *cov, 1e-30),
+        };
+        let k = &p_dyn * h.transpose() * &s_inv;
+
+        let mut combined_innovation = DVec::zeros(2);
+        let mut sum_beta_nu_nut = DMat::zeros(2, 2);
+
+        // PDA combined innovation
+        let mut total_hit_prob = 0.0;
+        let mut innovations = Vec::with_capacity(meas_probs.len());
+        for (z, beta) in meas_probs {
+            let nu = z - &hx;
+            combined_innovation += &nu * *beta;
+            sum_beta_nu_nut += &nu * nu.transpose() * *beta;
+            total_hit_prob += *beta;
+            innovations.push(nu);
+        }
+
+        // State update: x' = x + K * (sum beta_j nu_j)
+        let state_update = &k * &combined_innovation;
+        let new_state = StateVec::from_fn(|r, _| state[r] + state_update[r]);
+
+        // Covariance update (PDA format)
+        // Pc = P - K*S*K^T (standard update cov)
+        // P' = P - (1 - beta_0) * K*S*K^T + dP
+        let k_s_kt = &k * s.clone() * k.transpose();
+        // Spread of innovations: dP = K * [ sum(beta_j nu_j nu_j^T) - nu_combined * nu_combined^T ] * K^T
+        let spread = sum_beta_nu_nut - &combined_innovation * combined_innovation.transpose();
+        let dp = &k * spread * k.transpose();
+
+        let new_p_dyn = &p_dyn - &k_s_kt * total_hit_prob + dp;
+        let new_cov = StateCov::from_fn(|r, c| new_p_dyn[(r, c)]);
+
+        // Compute a combined marginal likelihood for the track using the normal distribution 
+        // to feed into the mixed IMM likelihood.
+        let mut jpda_likelihood = miss_prob; // In PDA, base density accounts for missed
+        let dim = 2.0;
+        let det = s.determinant().abs().max(1e-30);
+        let norm = 1.0 / ((2.0 * std::f64::consts::PI).powf(dim / 2.0) * det.sqrt());
+        for (nu, (_, beta)) in innovations.iter().zip(meas_probs.iter()) {
+            let mahalanobis_sq = (nu.transpose() * &s_inv * nu)[(0, 0)];
+            let l = norm * (-0.5 * mahalanobis_sq).exp();
+            jpda_likelihood += beta * l;
+        }
+
+        (new_state, new_cov, jpda_likelihood)
     }
 }
 

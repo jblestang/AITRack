@@ -87,6 +87,21 @@ impl CtKalmanFilter {
         });
         kf.update(state, cov, z, h, r)
     }
+
+    pub fn update_jpda(
+        &self,
+        state: &StateVec,
+        cov: &StateCov,
+        meas_probs: &[(DVec, f64)],
+        miss_prob: f64,
+        h: &DMat,
+        r: &DMat,
+    ) -> (StateVec, StateCov, f64) {
+        let kf = CvKalmanFilter::new(CvKfConfig {
+            process_noise_std: 0.0,
+        });
+        kf.update_jpda(state, cov, meas_probs, miss_prob, h, r)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +232,47 @@ impl ImmState {
             likelihoods.push(gaussian_likelihood(&res.innovation, &res.innovation_cov));
             self.models[j].state = res.state;
             self.models[j].cov = res.cov;
+        }
+
+        // μ_j ∝ L_j · μ̄_j
+        let total: f64 = (0..N_MODELS)
+            .map(|j| likelihoods[j] * self.models[j].prob)
+            .sum::<f64>()
+            .max(1e-30);
+
+        for (j, like) in likelihoods.iter().enumerate().take(N_MODELS) {
+            self.models[j].prob = (like * self.models[j].prob / total).max(1e-10);
+        }
+        self.normalise_probs();
+        self.fuse();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_jpda(
+        &mut self,
+        meas_probs: &[(DVec, f64)],
+        miss_prob: f64,
+        h: &DMat,
+        r: &DMat,
+        kf_st: &CvKalmanFilter,
+        kf_ag: &CvKalmanFilter,
+        kf_ctl: &CtKalmanFilter,
+        kf_ctr: &CtKalmanFilter,
+    ) {
+        let mut likelihoods = Vec::with_capacity(N_MODELS);
+
+        // Update each model and collect pseudo-likelihoods from the JPDA combining
+        for j in 0..N_MODELS {
+            let (new_state, new_cov, likelihood) = match j {
+                0 => kf_st.update_jpda(&self.models[j].state, &self.models[j].cov, meas_probs, miss_prob, h, r),
+                1 => kf_ag.update_jpda(&self.models[j].state, &self.models[j].cov, meas_probs, miss_prob, h, r),
+                2 => kf_ctl.update_jpda(&self.models[j].state, &self.models[j].cov, meas_probs, miss_prob, h, r),
+                3 => kf_ctr.update_jpda(&self.models[j].state, &self.models[j].cov, meas_probs, miss_prob, h, r),
+                _ => unreachable!(),
+            };
+            likelihoods.push(likelihood.max(1e-30));
+            self.models[j].state = new_state;
+            self.models[j].cov = new_cov;
         }
 
         // μ_j ∝ L_j · μ̄_j

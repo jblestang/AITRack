@@ -16,7 +16,7 @@
 use crate::{
     association::{hungarian_solve, partition_components, BipartiteGraph},
     bias::BiasEstimator,
-    gating::{compute_gate_ellipse, mahalanobis_gate, GatingEllipse, SpatialGrid, CHI2_99},
+    gating::{compute_gate_ellipse, mahalanobis_gate, GatingEllipse, SpatialGrid},
     imm::CtKalmanFilter,
     kf::{CvKalmanFilter, CvKfConfig, KalmanFilter},
     track::{Track, TrackStatus},
@@ -62,6 +62,8 @@ pub struct PipelineConfig {
     pub merge_dist_sq: f64,
     /// The Mahalanobis 2D statistical distance squared limit to allow track merging.
     pub merge_maha_sq: f64,
+    /// Fixed sensor biases (dx, dy, dtheta, br, ba, dt0)
+    pub fixed_biases: std::collections::HashMap<crate::types::SensorId, crate::bias::SensorBiasState>,
 }
 
 impl Default for PipelineConfig {
@@ -87,6 +89,7 @@ impl Default for PipelineConfig {
             enable_track_merging: false, // Disabled to prevent it murdering the 50 dense-crossing targets
             merge_dist_sq: 6000.0 * 6000.0, // 6km fast spatial bound
             merge_maha_sq: 20.0, // 99.9% statistical overlap
+            fixed_biases: std::collections::HashMap::new(),
         }
     }
 }
@@ -179,6 +182,9 @@ impl Pipeline {
         let kf_ctl = CtKalmanFilter::new(0.3, config.imm_ct_sigma_p, config.imm_ct_sigma_v);
         let kf_ctr = CtKalmanFilter::new(-0.3, config.imm_ct_sigma_p, config.imm_ct_sigma_v);
         let track_manager = TrackManager::new(config.track_manager_config.clone());
+        let mut bias_estimator = BiasEstimator::new();
+        bias_estimator.sensor_states = config.fixed_biases.clone();
+        
         Self {
             config,
             tracks: Vec::new(),
@@ -187,7 +193,7 @@ impl Pipeline {
             kf_fast,
             kf_ctl,
             kf_ctr,
-            bias_estimator: BiasEstimator::new(),
+            bias_estimator,
             sensor_positions: HashMap::new(),
             next_meas_id: 0,
         }
@@ -206,12 +212,15 @@ impl Pipeline {
             self.sensor_positions.insert(batch.sensor_id, pos);
         }
         let sensor_pos = self.sensor_positions.get(&batch.sensor_id).cloned().unwrap_or([0.0, 0.0, 0.0]);
-        let sensor_bias = self.bias_estimator.get_or_create(batch.sensor_id).clone();
+        let sensor_bias = self.bias_estimator.get_sensor_state(batch.sensor_id);
         let measurements: Vec<Measurement> = batch
             .measurements
             .iter()
             .map(|m| {
                 let mut mc = m.clone();
+                // Phase C: Apply temporal bias correction (T_true = T_received - dt0)
+                mc.timestamp = sensor_bias.correct_timestamp(m.timestamp);
+
                 // Apply spatial bias correction if available
                 if let crate::types::MeasurementValue::Cartesian2D { x, y } = &mut mc.value {
                     let (xc, yc) = sensor_bias.correct_cartesian_2d(*x, *y, sensor_pos);
@@ -289,12 +298,7 @@ impl Pipeline {
         }
 
         // Parallel gating over all live tracks
-        let mut gate_threshold = self.config.gate_threshold;
-        // Phase C: If we have low confidence in the bias, widen the gate significantly
-        // to allow "blind" association of offset measurements.
-        if sensor_bias.confidence < 0.9 {
-            gate_threshold *= 15.0; // 15x area, ~3.9x radius
-        }
+        let gate_threshold = self.config.gate_threshold;
         let r_default = if measurements.is_empty() {
             DMatrix::from_diagonal(&DVector::from_vec(vec![100.0, 100.0]))
         } else {
@@ -325,6 +329,7 @@ impl Pipeline {
                     }
 
                     let r = meas.noise_cov_matrix();
+
                     let gate =
                         mahalanobis_gate(&track.state, &track.cov, &z, &h, &r, gate_threshold);
                     if gate.passes {
@@ -447,9 +452,6 @@ impl Pipeline {
             std::collections::HashSet::new();
         let h_ref = &h;
         let mut confirmations = 0;
-        
-        // Collect pairs for bias estimation (Phase C)
-        let mut high_conf_pairs = Vec::new();
 
         if self.config.use_jpda {
             for (ti, m_probs, miss_prob) in jpda_outputs {
@@ -470,17 +472,6 @@ impl Pipeline {
                     continue; // Register miss happens later
                 }
                 
-                // Track JPDA innovation for bias estimation if dominating
-                // We harvest the highest probability association if it's confidently unique
-                if !jpda_meas.is_empty() {
-                    let (best_z, best_prob) = jpda_meas.iter()
-                        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-                        .unwrap();
-                    if *best_prob > 0.8 && track.status != TrackStatus::Deleted {
-                        let innov = best_z - h_ref * nalgebra::DVector::from_iterator(6, track.state.iter().copied());
-                        high_conf_pairs.push((track.state.clone(), innov));
-                    }
-                }
 
                 let r = measurements[m_probs[0].0].noise_cov_matrix();
 
@@ -511,21 +502,6 @@ impl Pipeline {
 
                 let track = &mut self.tracks[*ti];
                 
-                // Track standard GNN innovation for bias estimation
-                if track.status != TrackStatus::Deleted {
-                     // Check Mahalanobis distance to ensure it's a high-confidence match before updating bias
-                     let s = h_ref * track.cov * h_ref.transpose() + &r;
-                     let innov = &z - h_ref * nalgebra::DVector::from_iterator(6, track.state.iter().copied());
-                     
-                     if let Some(s_inv) = s.try_inverse() {
-                         let d2 = innov.transpose() * s_inv * &innov;
-                         // Widen harvest gate (e.g. 4x the normal gate) to allow large initial 
-                         // biases to contribute to the estimate.
-                         if d2[0] < self.config.gate_threshold * 4.0 {
-                             high_conf_pairs.push((track.state.clone(), innov));
-                         }
-                     }
-                }
 
                 if let Some(imm) = &mut track.imm {
                     // IMM update: per-model update + likelihood weighting + fuse
@@ -571,9 +547,7 @@ impl Pipeline {
             }
         }
         
-        // Feed harvested high-confidence pairs into BiasEstimator
-        self.bias_estimator.update(batch.sensor_id, &high_conf_pairs, sensor_pos);
-        
+        // Feed harvested high-confidence        
         debug.timing_update_us = t0.elapsed().as_micros() as u64;
 
         // ----------------------------------------------------------------
@@ -606,7 +580,7 @@ impl Pipeline {
         // Prevent duplicate tracks from asynchronous multi-sensor fusion.
         // ----------------------------------------------------------------
         if self.config.enable_track_merging {
-            let t_merge = Instant::now();
+            let _t_merge = Instant::now();
             let mut merged_away = std::collections::HashSet::new();
             
             // O(T^2) spatial clustering loop 
@@ -744,6 +718,7 @@ mod tests {
             sensor_id: SensorId(sensor_id),
             sensor_time: t,
             arrival_time: t,
+            sensor_pos: None,
             measurements,
         }
     }

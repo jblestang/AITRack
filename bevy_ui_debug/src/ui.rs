@@ -281,14 +281,12 @@ pub fn ui_track_inspector(
                                 radar.bias.dx, radar.bias.dy, radar.bias.dtheta, radar.bias.dt0
                             ));
                             
-                            // Visualize the Tracker's Online Estimations (Phase C)
+                            // Visualize the Tracker's Bias Compensation (Phase C)
                             if let Some(est) = output.debug.sensor_biases.get(&radar.id) {
                                 ui.label(egui::RichText::new(format!(
-                                    "Estimated bias (EMA): dx={:.0}m dy={:.0}m dθ={:.3}rad dt0={:.3}s",
-                                    est.spatial.dx, est.spatial.dy, est.spatial.dtheta, est.temporal.dt0
+                                    "Applied Bias: dx={:.0}m dy={:.0}m br={:.1}m ba={:.3}rad dθ={:.3}rad dt0={:.3}s",
+                                    est.spatial.dx, est.spatial.dy, est.spatial.br, est.spatial.ba, est.spatial.dtheta, est.temporal.dt0
                                 )).color(egui::Color32::from_rgb(100, 200, 255)));
-                                
-                                ui.add(egui::ProgressBar::new(est.confidence as f32).text(format!("Confidence: {:.1}%", est.confidence * 100.0)));
                             } else {
                                 ui.label(egui::RichText::new("Estimated bias: (no data yet)").color(egui::Color32::DARK_GRAY));
                             }

@@ -1,0 +1,8 @@
+{
+  "elapsed_s": 0.373646041,
+  "final_tracks": 88,
+  "scenario": "dense_crossing",
+  "seed": 42,
+  "sensor_biases": {},
+  "total_batches": 678
+}

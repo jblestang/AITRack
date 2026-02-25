@@ -21,7 +21,7 @@ sim::Scenario
 sim::RadarBatch { sensor_id, timestamp, Vec<Measurement> }
     ↓ passed to
 tracker_core::Pipeline::process_batch()
-    ├── 1. Bias correction (Phase C: spatial + temporal)
+    ├── 1. Bias correction (Fixed config: spatial + temporal)
     ├── 2. Predict all tracks to batch_time (KF predict)
     ├── 3. Mahalanobis gate check (track × meas pairs)
     ├── 4. Build sparse bipartite graph
@@ -51,7 +51,9 @@ cli             (metrics + export)
 | `association` | Bipartite graph, union-find component partition, O(n³) Hungarian solver |
 | `track_manager` | Birth/confirm/delete lifecycle policy |
 | `pipeline` | 10-step pipeline orchestrator with debug data collection |
-| `bias` | Bias types + estimator stub (Phase C) |
+| `bias` | Fixed bias lookup and correction logic from configuration |
+| `ekf` | Extended Kalman Filter for non-linear polar measurements |
+| `ukf` | Unscented Kalman Filter for complex non-linear models |
 | `metrics` | RMSE, precision, recall, ID-switch accumulation |
 
 ### `sensor_models`

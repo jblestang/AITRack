@@ -13,14 +13,17 @@
 
 pub mod association;
 pub mod bias;
+pub mod ekf;
 pub mod gating;
 pub mod imm;
+pub mod jpda;
 pub mod kf;
 pub mod metrics;
 pub mod pipeline;
 pub mod track;
 pub mod track_manager;
 pub mod types;
+pub mod ukf;
 
 pub use pipeline::{Pipeline, PipelineConfig, PipelineDebugData, PipelineOutput};
 pub use track::{Track, TrackStatus};
